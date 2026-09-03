@@ -89,6 +89,28 @@ class Gameweek(BaseModel):
     highest_score: int | None = None
 
 
+class Fixture(BaseModel):
+    """A single Fantasy Premier League fixture."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    event: int | None = None
+
+    team_h: int
+    team_a: int
+
+    team_h_score: int | None = None
+    team_a_score: int | None = None
+
+    finished: bool
+    kickoff_time: str | None = None
+
+    difficulty: int
+
+    finished_provisional: bool = False
+
+
 class BootstrapData(BaseModel):
     model_config = ConfigDict(extra="ignore")
 

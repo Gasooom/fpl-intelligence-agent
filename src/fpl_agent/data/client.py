@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from fpl_agent.data.models import BootstrapData
+from fpl_agent.data.models import BootstrapData, Fixture
 
 
 class FPLClient:
@@ -26,3 +26,15 @@ class FPLClient:
             data: dict[str, Any] = response.json()
 
         return BootstrapData.model_validate(data)
+
+    async def get_fixtures(self) -> list[Fixture]:
+        """Fetch and validate all FPL fixtures."""
+        url = f"{self.BASE_URL}/fixtures/"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            data: list[dict[str, Any]] = response.json()
+
+        return [Fixture.model_validate(fixture) for fixture in data]
