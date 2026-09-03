@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+src/fantasy_decision_intelligence_agent.egg-info/PKG-INFO
+src/fantasy_decision_intelligence_agent.egg-info/SOURCES.txt
+src/fantasy_decision_intelligence_agent.egg-info/dependency_links.txt
+src/fantasy_decision_intelligence_agent.egg-info/requires.txt
+src/fantasy_decision_intelligence_agent.egg-info/top_level.txt
+src/fpl_agent/__init__.py
+src/fpl_agent/data/__init__.py

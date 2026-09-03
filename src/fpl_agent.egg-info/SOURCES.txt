@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/fpl_agent/__init__.py
+src/fpl_agent.egg-info/PKG-INFO
+src/fpl_agent.egg-info/SOURCES.txt
+src/fpl_agent.egg-info/dependency_links.txt
+src/fpl_agent.egg-info/top_level.txt
+src/fpl_agent/data/__init__.py

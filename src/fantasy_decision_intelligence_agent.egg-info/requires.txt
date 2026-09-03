@@ -1,0 +1,10 @@
+openai-agents
+httpx
+pydantic>=2
+python-dotenv
+
+[dev]
+pytest
+pytest-asyncio
+ruff
+mypy
