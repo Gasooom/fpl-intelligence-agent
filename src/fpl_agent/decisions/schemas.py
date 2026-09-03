@@ -50,3 +50,12 @@ class CaptaincyDecision(BaseModel):
     form: float
     risk: RiskSummary
     evidence: list[DecisionEvidence] = Field(default_factory=list)
+
+
+class FPLDecisionOutput(BaseModel):
+    """Structured output returned by the FPL agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transfer: TransferDecision | None = None
+    captaincy: CaptaincyDecision | None = None
