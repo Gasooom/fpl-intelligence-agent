@@ -102,3 +102,33 @@ async def test_run_application_rejects_unexpected_output_type() -> None:
         ),
     ):
         await run_application("Analyze my team.")
+
+
+@pytest.mark.asyncio
+async def test_run_application_uses_real_fpl_agent() -> None:
+    expected_output = build_decision_output()
+
+    async def fake_runner_run(
+        *args: object,
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        agent = args[0]
+
+        assert agent.name == "FPL Decision Intelligence Agent"
+        assert agent.output_type is FPLDecisionOutput
+        assert len(agent.tools) == 11
+        assert len(agent.mcp_servers) == 2
+
+        return build_result(expected_output)
+
+    with patch(
+        "fpl_agent.agent.runner.Runner.run",
+        new=AsyncMock(side_effect=fake_runner_run),
+    ) as mock_run:
+        result = await run_application(
+            "Who should I captain?",
+            context=FPLAgentContext(gameweek=5),
+        )
+
+    assert result is expected_output
+    mock_run.assert_awaited_once()
