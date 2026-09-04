@@ -15,6 +15,7 @@ from fpl_agent.agent.tools import (
     get_transfer_candidate_score,
 )
 from fpl_agent.decisions.schemas import FPLDecisionOutput
+from fpl_agent.mcp.server import get_mcp_servers
 
 
 def create_fpl_agent() -> Agent[FPLAgentContext]:
@@ -34,4 +35,5 @@ def create_fpl_agent() -> Agent[FPLAgentContext]:
             get_captaincy_score,
             get_risk_signals,
         ],
+        mcp_servers=get_mcp_servers(),
     )

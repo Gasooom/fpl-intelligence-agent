@@ -106,7 +106,8 @@ class Fixture(BaseModel):
     finished: bool
     kickoff_time: str | None = None
 
-    difficulty: int
+    team_h_difficulty: int
+    team_a_difficulty: int
 
     finished_provisional: bool = False
 

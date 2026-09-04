@@ -7,3 +7,15 @@ class FPLAgentError(Exception):
 
 class FPLAgentRunError(FPLAgentError):
     """Raised when an FPL agent run fails."""
+
+
+class MCPError(FPLAgentError):
+    """Base exception for MCP-related failures."""
+
+
+class FPLMCPError(MCPError):
+    """Raised when the FPL MCP capability fails."""
+
+
+class ExternalMCPError(MCPError):
+    """Raised when the external-data MCP capability fails."""

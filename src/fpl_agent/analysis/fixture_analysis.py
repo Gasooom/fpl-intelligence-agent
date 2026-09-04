@@ -29,7 +29,7 @@ def fixture_difficulty(
             gameweek=fixture.event,
             opponent_team_id=fixture.team_a,
             is_home=True,
-            difficulty=fixture.difficulty,
+            difficulty=fixture.team_h_difficulty,
         )
 
     if team_id == fixture.team_a:
@@ -39,7 +39,7 @@ def fixture_difficulty(
             gameweek=fixture.event,
             opponent_team_id=fixture.team_h,
             is_home=False,
-            difficulty=fixture.difficulty,
+            difficulty=fixture.team_a_difficulty,
         )
 
     raise ValueError(

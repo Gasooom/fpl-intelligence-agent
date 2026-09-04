@@ -45,3 +45,13 @@ def test_fpl_agent_has_all_decision_engine_tools() -> None:
     }
 
     assert tool_names == expected_tool_names
+
+
+def test_fpl_agent_has_mcp_servers() -> None:
+    agent = create_fpl_agent()
+
+    assert len(agent.mcp_servers) == 2
+    assert {server.name for server in agent.mcp_servers} == {
+        "FPL Decision Intelligence",
+        "FPL External Data",
+    }
