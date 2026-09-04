@@ -4,7 +4,12 @@ from typing import Any
 
 import httpx
 
-from fpl_agent.data.models import BootstrapData, Fixture
+from fpl_agent.data.models import (
+    BootstrapData,
+    Fixture,
+    FPLEntry,
+    SquadPicksResponse,
+)
 
 
 class FPLClient:
@@ -38,3 +43,31 @@ class FPLClient:
             data: list[dict[str, Any]] = response.json()
 
         return [Fixture.model_validate(fixture) for fixture in data]
+
+    async def get_entry(self, entry_id: int) -> FPLEntry:
+        """Fetch an FPL manager entry."""
+        url = f"{self.BASE_URL}/entry/{entry_id}/"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            data: dict[str, Any] = response.json()
+
+        return FPLEntry.model_validate(data)
+
+    async def get_entry_picks(
+        self,
+        entry_id: int,
+        gameweek: int,
+    ) -> SquadPicksResponse:
+        """Fetch an FPL manager's squad for a gameweek."""
+        url = f"{self.BASE_URL}/entry/{entry_id}/event/{gameweek}/picks/"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            data: dict[str, Any] = response.json()
+
+        return SquadPicksResponse.model_validate(data)

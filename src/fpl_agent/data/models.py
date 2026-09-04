@@ -118,3 +118,44 @@ class BootstrapData(BaseModel):
     elements: list[Player]
     teams: list[Team]
     events: list[Gameweek]
+
+
+class FPLEntry(BaseModel):
+    """FPL manager entry."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    player_first_name: str
+    player_last_name: str
+
+    summary_overall_points: int
+    summary_event_points: int
+    summary_event_rank: int | None = None
+    current_event: int | None = None
+
+
+class SquadPick(BaseModel):
+    """A player's selection in an FPL gameweek squad."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    element: int
+    position: int
+    multiplier: int
+    is_captain: bool
+    is_vice_captain: bool
+    selling_price: int
+    purchase_price: int
+    purchase_event: int
+
+
+class SquadPicksResponse(BaseModel):
+    """FPL gameweek squad response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    active_chip: str | None = None
+    picks: list[SquadPick]
+    entry_history: dict[str, object] = {}
+    subs: list[dict[str, object]] = []

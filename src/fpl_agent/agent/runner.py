@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from agents import Runner, RunResult
+from agents.mcp import MCPServerManager
 
 from fpl_agent.agent.context import FPLAgentContext
 from fpl_agent.agent.core import create_fpl_agent
@@ -18,11 +19,12 @@ async def run_fpl_agent(
         context = FPLAgentContext()
 
     try:
-        return await Runner.run(
-            agent,
-            input_text,
-            context=context,
-        )
+        async with MCPServerManager(agent.mcp_servers):
+            return await Runner.run(
+                agent,
+                input_text,
+                context=context,
+            )
     except Exception as exc:
         raise FPLAgentRunError(
             "The FPL decision agent failed to complete the run."
