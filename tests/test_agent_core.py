@@ -30,6 +30,40 @@ def test_fpl_agent_has_structured_output() -> None:
     assert agent.output_type is FPLDecisionOutput
 
 
+def test_fpl_agent_has_manager_orchestration_rules() -> None:
+    agent = create_fpl_agent()
+
+    instructions = agent.instructions
+
+    assert "manager of a small set of specialist agents" in instructions
+    assert "Transfer Specialist" in instructions
+    assert "Captain Specialist" in instructions
+    assert "Risk Specialist" in instructions
+    assert "For transfer-related decisions" in instructions
+    assert "For captaincy-related decisions" in instructions
+    assert "Use the Risk Specialist" in instructions
+    assert "You are responsible for synthesizing" in instructions
+
+
+def test_fpl_agent_treats_specialists_as_analysis_not_authority() -> None:
+    agent = create_fpl_agent()
+
+    instructions = agent.instructions
+
+    assert "specialist outputs as analysis and evidence" in instructions
+    assert "not as final authority" in instructions
+    assert "You are responsible for synthesizing the available evidence" in instructions
+
+
+def test_fpl_agent_avoids_unnecessary_specialist_calls() -> None:
+    agent = create_fpl_agent()
+
+    instructions = agent.instructions
+
+    assert "Do not call specialists unnecessarily" in instructions
+    assert "simple requests" in instructions
+
+
 def test_fpl_agent_has_all_decision_engine_tools() -> None:
     agent = create_fpl_agent()
 
