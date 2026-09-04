@@ -1,4 +1,6 @@
-from agents import Agent
+from __future__ import annotations
+
+from agents import Agent, FunctionTool
 
 from fpl_agent.agent.core import create_fpl_agent
 from fpl_agent.agent.instructions import FPL_AGENT_INSTRUCTIONS
@@ -42,9 +44,84 @@ def test_fpl_agent_has_all_decision_engine_tools() -> None:
         "get_transfer_candidate_score",
         "get_captaincy_score",
         "get_risk_signals",
+        "transfer_specialist",
+        "captain_specialist",
+        "risk_specialist",
     }
 
     assert tool_names == expected_tool_names
+
+
+def test_transfer_specialist_tool_is_function_tool() -> None:
+    agent = create_fpl_agent()
+
+    transfer_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "transfer_specialist"
+    )
+
+    assert isinstance(transfer_tool, FunctionTool)
+
+
+def test_captain_specialist_tool_is_function_tool() -> None:
+    agent = create_fpl_agent()
+
+    captain_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "captain_specialist"
+    )
+
+    assert isinstance(captain_tool, FunctionTool)
+
+
+def test_risk_specialist_tool_is_function_tool() -> None:
+    agent = create_fpl_agent()
+
+    risk_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "risk_specialist"
+    )
+
+    assert isinstance(risk_tool, FunctionTool)
+
+
+def test_fpl_agent_exposes_transfer_specialist_as_tool() -> None:
+    agent = create_fpl_agent()
+
+    transfer_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "transfer_specialist"
+    )
+
+    assert transfer_tool.name == "transfer_specialist"
+    assert transfer_tool.params_json_schema["type"] == "object"
+    assert "input" in transfer_tool.params_json_schema["properties"]
+
+
+def test_fpl_agent_exposes_captain_specialist_as_tool() -> None:
+    agent = create_fpl_agent()
+
+    captain_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "captain_specialist"
+    )
+
+    assert captain_tool.name == "captain_specialist"
+    assert captain_tool.params_json_schema["type"] == "object"
+    assert "input" in captain_tool.params_json_schema["properties"]
+
+
+def test_fpl_agent_exposes_risk_specialist_as_tool() -> None:
+    agent = create_fpl_agent()
+
+    risk_tool = next(
+        tool for tool in agent.tools
+        if tool.name == "risk_specialist"
+    )
+
+    assert risk_tool.name == "risk_specialist"
+    assert risk_tool.params_json_schema["type"] == "object"
+    assert "input" in risk_tool.params_json_schema["properties"]
 
 
 def test_fpl_agent_has_mcp_servers() -> None:
