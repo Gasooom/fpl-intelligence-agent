@@ -602,3 +602,22 @@ def test_build_squad_decision_rejects_unknown_player_id() -> None:
             fixtures=_make_test_fixtures(),
             picks=[1, 999],
         )
+
+
+def test_build_squad_decision_rejects_duplicate_player_ids() -> None:
+    """A malformed pick list must fail clearly, not silently double-count
+    the same real-world player as two distinct starting-XI slots.
+    """
+    players = [
+        _make_test_player(1, 1, 1),
+        _make_test_player(2, 2, 2),
+        _make_test_player(3, 2, 3),
+    ]
+
+    with pytest.raises(ValueError, match="Duplicate player IDs"):
+        build_squad_decision(
+            players=players,
+            teams=_make_test_teams(),
+            fixtures=_make_test_fixtures(),
+            picks=[1, 2, 2, 3],
+        )

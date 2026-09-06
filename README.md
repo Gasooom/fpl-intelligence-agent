@@ -220,7 +220,7 @@ back, so it can never drift from what the API actually returns.
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-221+ tests, all deterministic and offline - no test in the default suite
+230+ tests, all deterministic and offline - no test in the default suite
 calls the live FPL API. Coverage includes:
 
 - Scoring unit tests: sell scoring, buy/transfer scoring, captaincy

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from fpl_agent.data.models import Fixture, Player, Team
 from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
 from fpl_agent.decisions.transfer_analysis import (
@@ -199,6 +201,36 @@ def test_classify_transfer_priority_avoid() -> None:
             buy_availability_risk=0.0,
         )
         == "avoid"
+    )
+
+
+@pytest.mark.parametrize(
+    ("net_improvement", "expected_priority"),
+    [
+        (2.0, "essential"),
+        (1.999, "strong"),
+        (1.0, "strong"),
+        (0.999, "optional"),
+        (0.3, "optional"),
+        (0.299, "avoid"),
+        (0.0, "avoid"),
+        (-1.0, "avoid"),
+    ],
+)
+def test_classify_transfer_priority_exact_thresholds(
+    net_improvement: float,
+    expected_priority: str,
+) -> None:
+    """Thresholds are inclusive on their lower bound (>=), so the exact
+    boundary value belongs to the higher tier, not the lower one.
+    """
+    assert (
+        classify_transfer_priority(
+            net_improvement=net_improvement,
+            sell_availability_risk=0.0,
+            buy_availability_risk=0.0,
+        )
+        == expected_priority
     )
 
 

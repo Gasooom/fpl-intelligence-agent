@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -435,39 +436,51 @@ def build_squad_decision(
     players: list[Player],
     teams: list[Team],
     fixtures: list[Fixture],
-    picks: list[SquadPick] | list[int] | None = None,
+    picks: list[SquadPick] | list[int],
 ) -> SquadDecision:
-    """Build a deterministic squad decision."""
-    if picks is not None:
-        pick_ids = _normalize_pick_ids(picks)
+    """Build a deterministic squad decision.
 
-        player_by_id = {
-            player.id: player
-            for player in players
-        }
+    picks must be the manager's own supplied squad - real FPL
+    SquadPick objects, or raw player IDs in tests. This function
+    always scores and optimizes only over those players, never the
+    full FPL player pool: there is deliberately no "analyze everyone"
+    fallback, since that would run the starting-XI combinatorial
+    search across hundreds of players instead of a 15-player squad.
+    """
+    pick_ids = _normalize_pick_ids(picks)
 
-        unknown_ids = [
-            player_id
-            for player_id in pick_ids
-            if player_id not in player_by_id
-        ]
+    player_by_id = {
+        player.id: player
+        for player in players
+    }
 
-        if unknown_ids:
-            raise ValueError(
-                f"Unknown player IDs: {unknown_ids}",
-            )
+    unknown_ids = [
+        player_id
+        for player_id in pick_ids
+        if player_id not in player_by_id
+    ]
 
-        selected_players = [
-            player_by_id[player_id]
-            for player_id in pick_ids
-            if is_player_available(player_by_id[player_id])
-        ]
-    else:
-        selected_players = [
-            player
-            for player in players
-            if is_player_available(player)
-        ]
+    if unknown_ids:
+        raise ValueError(
+            f"Unknown player IDs: {unknown_ids}",
+        )
+
+    duplicate_ids = sorted(
+        player_id
+        for player_id, count in Counter(pick_ids).items()
+        if count > 1
+    )
+
+    if duplicate_ids:
+        raise ValueError(
+            f"Duplicate player IDs in picks: {duplicate_ids}",
+        )
+
+    selected_players = [
+        player_by_id[player_id]
+        for player_id in pick_ids
+        if is_player_available(player_by_id[player_id])
+    ]
 
     if len(selected_players) < 11:
         raise ValueError(
