@@ -49,7 +49,7 @@ flowchart LR
     H --> J["GameweekDecision\n(evidence + confidence + summary)"]
     I --> J
     J --> K["FastAPI\nGET /api/v1/decision/{entry_id}"]
-    K --> L["Frontend / consumer\n(OpenAPI docs, curl, future UI)"]
+    K --> L["Demo page (GET /)\n+ OpenAPI docs, curl, any client"]
 ```
 
 Four concepts stay deliberately separate through this pipeline, rather
@@ -107,6 +107,11 @@ than being collapsed into one score:
   replaces a doubtful/unavailable player with a fully available one.
   `avoid`-classified pairs are filtered out of the response entirely -
   the goal is decision usefulness, not a long list.
+- **Best single transfer**: `best_transfer` answers "if I make ONE
+  transfer, what's the strongest move?" - the accepted pair with the
+  highest priority tier, tie-broken by projected point gain. It is
+  always one of `transfer_recommendations`, just picked out explicitly
+  rather than left implicit in list order.
 
 ## Risk vs. confidence vs. availability
 
@@ -175,7 +180,13 @@ running.
     }
   ],
   "transfer_count": 5,
-  "decision_summary": "Captain: Cherki (10.31 expected points). Vice-captain: Haaland. 5 transfer recommendation(s): ... Decision confidence: Low."
+  "best_transfer": {
+    "sell": { "web_name": "Coppola" },
+    "buy": { "web_name": "Gvardiol" },
+    "net_improvement": 9.13,
+    "priority": "essential"
+  },
+  "decision_summary": "Captain: Cherki (10.31 expected points). Vice-captain: Haaland. 5 transfer recommendation(s): ... Best single transfer: Coppola -> Gvardiol (+9.13 expected points, essential). Decision confidence: Low."
 }
 ```
 
@@ -185,13 +196,31 @@ readability; the actual schema exposes richer per-player detail (form,
 fixture difficulty, points-per-90, xGI/90, risk breakdown, etc.) without
 leaking internal-only fields like the raw selection-score components.
 
+## Demo page
+
+`GET /` serves a single self-contained HTML/CSS/vanilla-JS page
+(`app/static/index.html`) - no templating engine, no frontend framework,
+no build step. Enter an FPL entry ID (and optionally a gameweek) and it
+renders:
+
+- Captain and vice-captain, with expected points and captaincy score
+- Starting XI grouped by position, and the bench
+- Must-play players (or an honest note when none currently qualify)
+- A highlighted **best single transfer** box (sell → buy, expected gain,
+  risk change, priority, reasons), any further recommended transfers
+  below it, and the top ranked sell/buy candidates
+
+The page does zero scoring itself - it only calls
+`GET /api/v1/decision/{entry_id}` client-side and renders whatever comes
+back, so it can never drift from what the API actually returns.
+
 ## Testing
 
 ```
 .venv/Scripts/python.exe -m pytest -q
 ```
 
-215+ tests, all deterministic and offline - no test in the default suite
+221+ tests, all deterministic and offline - no test in the default suite
 calls the live FPL API. Coverage includes:
 
 - Scoring unit tests: sell scoring, buy/transfer scoring, captaincy
@@ -233,7 +262,10 @@ pip install -e ".[dev]"
 # 4. Start the API
 .venv/Scripts/python.exe -m uvicorn app.main:app --reload
 
-# 5. Try the primary demo endpoint
+# 5a. Open the demo page in a browser
+#     http://127.0.0.1:8000/
+
+# 5b. ...or call the API directly
 curl "http://127.0.0.1:8000/api/v1/decision/8731757"
 ```
 
