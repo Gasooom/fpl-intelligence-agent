@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import get_decision_service
 from app.main import app
-from fpl_agent.decisions.squad_analysis import SquadDecision, SquadPlayerAnalysis
+from fpl_agent.analysis.sell_scoring import SellScore
+from fpl_agent.decisions.gameweek_decision import GameweekDecision
+from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
+from fpl_agent.decisions.transfer_analysis import (
+    BuyCandidate,
+    SellCandidate,
+    TransferPair,
+)
 
 
 def make_player(
@@ -53,8 +60,8 @@ def make_player(
     )
 
 
-def make_decision() -> SquadDecision:
-    """Create a complete deterministic squad decision for route tests."""
+def make_squad() -> tuple[list[SquadPlayerAnalysis], list[SquadPlayerAnalysis]]:
+    """Build a deterministic 11 + 4 squad for gameweek-decision tests."""
     starting_xi = [
         make_player(1, 1, 1, 6.0, 5.01),
         make_player(2, 2, 2, 6.0, 5.02),
@@ -76,12 +83,94 @@ def make_decision() -> SquadDecision:
         make_player(15, 4, 5, 5.0, 4.15),
     ]
 
-    return SquadDecision(
+    return starting_xi, bench
+
+
+def make_transfer_pair() -> TransferPair:
+    """Build one deterministic transfer pair for response-shape tests."""
+    sell = SellCandidate(
+        player_id=20,
+        web_name="Weak Player",
+        position_type=2,
+        team_id=6,
+        price=4.5,
+        expected_points=1.0,
+        form=2.0,
+        fixture_difficulty=4.0,
+        overall_risk=0.7,
+        availability_risk=0.5,
+        risk_level="high",
+        sample_confidence=0.25,
+        selection_score=-0.5,
+        sell_score=SellScore(
+            player_id=20,
+            score=5.5,
+            risk_penalty=2.8,
+            low_projection_penalty=2.5,
+            difficult_fixture_penalty=0.5,
+            availability_penalty=1.5,
+            low_confidence_penalty=0.5,
+        ),
+        rank=1,
+        reasons=["High overall risk (high, 0.7)"],
+    )
+
+    buy = BuyCandidate(
+        player_id=21,
+        web_name="Strong Target",
+        position_type=2,
+        team_id=7,
+        price=5.5,
+        expected_points=8.0,
+        form=7.0,
+        fixture_difficulty=2.0,
+        overall_risk=0.1,
+        availability_risk=0.0,
+        risk_level="low",
+        sample_confidence=1.0,
+        selection_score=8.6,
+        value_score=0.15,
+        rank=1,
+        reasons=["Expected points: 8.0", "Low overall risk"],
+    )
+
+    return TransferPair(
+        sell=sell,
+        buy=buy,
+        net_improvement=9.1,
+        risk_change=0.6,
+        price_change=1.0,
+        within_budget=True,
+        priority="essential",
+        reasons=["Higher expected points (8.0 vs 1.0)"],
+    )
+
+
+def make_gameweek_decision(
+    gameweek: int = 5,
+    transfer_recommendations: list[TransferPair] | None = None,
+) -> GameweekDecision:
+    """Build a complete deterministic gameweek decision for route tests."""
+    starting_xi, bench = make_squad()
+    pairs = transfer_recommendations or []
+
+    return GameweekDecision(
+        gameweek=gameweek,
+        generated_at="2026-01-01T00:00:00+00:00",
+        decision_engine_version="v1",
+        data_source="official-fpl-api",
         starting_xi=starting_xi,
         bench=bench,
         captain=starting_xi[10],
         vice_captain=starting_xi[9],
         must_play=[starting_xi[10], starting_xi[9]],
+        sell_candidates=[pair.sell for pair in pairs],
+        buy_candidates=[pair.buy for pair in pairs],
+        transfer_recommendations=pairs,
+        transfer_count=len(pairs),
+        confidence="High",
+        decision_summary="Captain: Player 11 (6.0 expected points). Decision confidence: High.",
+        evidence=[],
     )
 
 
@@ -95,18 +184,18 @@ class FakeDecisionService:
 
     def __init__(
         self,
-        decision: SquadDecision | None = None,
+        decision: GameweekDecision | None = None,
         error: Exception | None = None,
     ) -> None:
         self.decision = decision
         self.error = error
         self.calls: list[dict[str, int | None]] = []
 
-    async def analyze_squad(
+    async def analyze_gameweek(
         self,
         entry_id: int,
         gameweek: int | None = None,
-    ) -> SquadDecision:
+    ) -> GameweekDecision:
         self.calls.append({"entry_id": entry_id, "gameweek": gameweek})
 
         if self.error is not None:
@@ -128,7 +217,7 @@ def client() -> Generator[TestClient, None, None]:
 def test_valid_request_returns_deterministic_decision(
     client: TestClient,
 ) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get("/api/v1/decision/8731757")
@@ -136,17 +225,47 @@ def test_valid_request_returns_deterministic_decision(
     assert response.status_code == 200
 
     payload = response.json()
+    assert payload["gameweek"] == 5
+    assert payload["decision_engine_version"] == "v1"
+    assert payload["data_source"] == "official-fpl-api"
     assert len(payload["starting_xi"]) == 11
     assert len(payload["bench"]) == 4
     assert payload["captain"]["player_id"] == 11
     assert payload["vice_captain"]["player_id"] == 10
     assert [p["player_id"] for p in payload["must_play"]] == [11, 10]
+    assert payload["transfer_count"] == 0
+    assert payload["transfer_recommendations"] == []
+    assert payload["confidence"] == "High"
+
+
+def test_response_includes_transfer_recommendation_details(
+    client: TestClient,
+) -> None:
+    pair = make_transfer_pair()
+    fake_service = FakeDecisionService(
+        decision=make_gameweek_decision(transfer_recommendations=[pair]),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/decision/8731757")
+    payload = response.json()
+
+    assert payload["transfer_count"] == 1
+    recommendation = payload["transfer_recommendations"][0]
+    assert recommendation["sell"]["player_id"] == 20
+    assert recommendation["buy"]["player_id"] == 21
+    assert recommendation["priority"] == "essential"
+    assert recommendation["net_improvement"] == 9.1
+    assert recommendation["reasons"]
+
+    assert payload["sell_candidates"][0]["player_id"] == 20
+    assert payload["buy_candidates"][0]["player_id"] == 21
 
 
 def test_entry_id_and_default_gameweek_propagation(
     client: TestClient,
 ) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get("/api/v1/decision/8731757")
@@ -158,7 +277,7 @@ def test_entry_id_and_default_gameweek_propagation(
 def test_gameweek_query_parameter_propagation(
     client: TestClient,
 ) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get("/api/v1/decision/8731757", params={"gameweek": 5})
@@ -185,7 +304,7 @@ def test_service_value_error_returns_http_400(
 
 
 def test_invalid_entry_id_returns_http_422(client: TestClient) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get("/api/v1/decision/not-an-int")
@@ -195,7 +314,7 @@ def test_invalid_entry_id_returns_http_422(client: TestClient) -> None:
 
 
 def test_non_positive_gameweek_returns_http_422(client: TestClient) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get(
@@ -210,18 +329,29 @@ def test_non_positive_gameweek_returns_http_422(client: TestClient) -> None:
 def test_response_matches_deterministic_schema_and_hides_internal_fields(
     client: TestClient,
 ) -> None:
-    fake_service = FakeDecisionService(decision=make_decision())
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
     app.dependency_overrides[get_decision_service] = lambda: fake_service
 
     response = client.get("/api/v1/decision/8731757")
     payload = response.json()
 
     assert set(payload.keys()) == {
+        "gameweek",
+        "generated_at",
+        "decision_engine_version",
+        "data_source",
         "starting_xi",
         "bench",
         "captain",
         "vice_captain",
         "must_play",
+        "sell_candidates",
+        "buy_candidates",
+        "transfer_recommendations",
+        "transfer_count",
+        "confidence",
+        "decision_summary",
+        "evidence",
     }
 
     captain_fields = set(payload["captain"].keys())

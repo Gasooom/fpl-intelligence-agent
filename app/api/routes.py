@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from fpl_agent.api.decision import squad_decision_to_response
-from fpl_agent.api.schemas import SquadDecisionResponse
+from fpl_agent.api.decision import gameweek_decision_to_response
+from fpl_agent.api.schemas import GameweekDecisionResponse
 from fpl_agent.decisions.service import FPLDecisionService
 
 router = APIRouter(prefix="/api/v1", tags=["decisions"])
@@ -23,9 +23,9 @@ def get_decision_service() -> FPLDecisionService:
 
 @router.get(
     "/decision/{entry_id}",
-    response_model=SquadDecisionResponse,
+    response_model=GameweekDecisionResponse,
 )
-async def get_squad_decision(
+async def get_gameweek_decision(
     entry_id: int,
     gameweek: int | None = Query(
         default=None,
@@ -33,15 +33,18 @@ async def get_squad_decision(
         description="FPL gameweek to analyze. Defaults to the current gameweek.",
     ),
     service: FPLDecisionService = Depends(get_decision_service),
-) -> SquadDecisionResponse:
-    """Return a deterministic FPL squad decision.
+) -> GameweekDecisionResponse:
+    """Return the unified deterministic FPL gameweek decision.
 
-    This endpoint is a thin HTTP boundary: it delegates entirely to the
-    deterministic decision service and response conversion, and contains
-    no decision logic of its own.
+    Covers starting XI, bench, captaincy, and must-play alongside
+    deterministic sell/buy transfer intelligence. This endpoint is a
+    thin HTTP boundary: it delegates entirely to the deterministic
+    decision service and response conversion, and contains no decision
+    logic of its own. No LLM is involved in producing any field of
+    this response.
     """
     try:
-        decision = await service.analyze_squad(
+        decision = await service.analyze_gameweek(
             entry_id=entry_id,
             gameweek=gameweek,
         )
@@ -51,4 +54,4 @@ async def get_squad_decision(
             detail=str(exc),
         ) from exc
 
-    return squad_decision_to_response(decision)
+    return gameweek_decision_to_response(decision)
