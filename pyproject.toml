@@ -30,6 +30,12 @@ pythonpath = ["src"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Query() are designed to be called as parameter
+# defaults; this is the documented ruff remedy for that idiom rather
+# than a mutable-default bug.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
