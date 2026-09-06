@@ -32,6 +32,11 @@ _MEDIUM_CONFIDENCE_SAMPLE = 0.5
 _MEDIUM_CONFIDENCE_RISK = 0.5
 _STRONG_FORM = 6.0
 
+# Used only to rank already-accepted transfer pairs against one another
+# when picking the single best one - not used anywhere else, and does
+# not affect which pairs are accepted or classified as "avoid".
+_PRIORITY_RANK = {"essential": 3, "strong": 2, "optional": 1, "avoid": 0}
+
 
 @dataclass(frozen=True)
 class RecommendationEvidence:
@@ -71,6 +76,7 @@ class GameweekDecision:
     buy_candidates: list[BuyCandidate]
     transfer_recommendations: list[TransferPair]
     transfer_count: int
+    best_transfer: TransferPair | None
 
     confidence: str
     decision_summary: str
@@ -197,9 +203,33 @@ def _build_evidence(
     return evidence
 
 
+def select_best_transfer(
+    transfer_pairs: list[TransferPair],
+) -> TransferPair | None:
+    """Pick the single best transfer if only one transfer can be made.
+
+    Ranks accepted pairs by priority tier first (essential > strong >
+    optional), then by net_improvement within a tier. Every candidate
+    in transfer_pairs has already cleared build_transfer_pairs' own
+    worthwhile-improvement and "avoid" filtering, so this only decides
+    which of the already-worthwhile pairs is the single strongest move.
+    """
+    if not transfer_pairs:
+        return None
+
+    return max(
+        transfer_pairs,
+        key=lambda pair: (
+            _PRIORITY_RANK.get(pair.priority, 0),
+            pair.net_improvement,
+        ),
+    )
+
+
 def _build_summary(
     squad_decision: SquadDecision,
     transfer_pairs: list[TransferPair],
+    best_transfer: TransferPair | None,
     confidence: str,
 ) -> str:
     """Build a deterministic natural-language summary from computed facts.
@@ -229,6 +259,14 @@ def _build_summary(
         )
     else:
         parts.append("No worthwhile transfers found this gameweek.")
+
+    if best_transfer is not None:
+        parts.append(
+            f"Best single transfer: {best_transfer.sell.web_name} -> "
+            f"{best_transfer.buy.web_name} "
+            f"(+{best_transfer.net_improvement} expected points, "
+            f"{best_transfer.priority}).",
+        )
 
     parts.append(f"Decision confidence: {confidence}.")
 
@@ -290,6 +328,8 @@ def build_gameweek_decision(
         limit=buy_candidates_limit,
     )
 
+    best_transfer = select_best_transfer(transfer_pairs)
+
     confidence = _aggregate_confidence(squad_decision.starting_xi)
 
     evidence = _build_evidence(squad_decision, transfer_pairs)
@@ -297,6 +337,7 @@ def build_gameweek_decision(
     decision_summary = _build_summary(
         squad_decision,
         transfer_pairs,
+        best_transfer,
         confidence,
     )
 
@@ -314,6 +355,7 @@ def build_gameweek_decision(
         buy_candidates=buy_candidates,
         transfer_recommendations=transfer_pairs,
         transfer_count=len(transfer_pairs),
+        best_transfer=best_transfer,
         confidence=confidence,
         decision_summary=decision_summary,
         evidence=evidence,

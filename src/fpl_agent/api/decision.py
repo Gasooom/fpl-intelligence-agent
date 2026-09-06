@@ -182,6 +182,11 @@ def gameweek_decision_to_response(
             for pair in decision.transfer_recommendations
         ],
         transfer_count=decision.transfer_count,
+        best_transfer=(
+            _transfer_pair_to_response(decision.best_transfer)
+            if decision.best_transfer is not None
+            else None
+        ),
         confidence=decision.confidence,
         decision_summary=decision.decision_summary,
         evidence=[

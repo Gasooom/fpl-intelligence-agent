@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fpl_agent.analysis.sell_scoring import SellScore
 from fpl_agent.data.models import Fixture, Player, Team
 from fpl_agent.decisions.gameweek_decision import (
     DATA_SOURCE,
@@ -7,6 +8,12 @@ from fpl_agent.decisions.gameweek_decision import (
     GameweekDecision,
     RecommendationEvidence,
     build_gameweek_decision,
+    select_best_transfer,
+)
+from fpl_agent.decisions.transfer_analysis import (
+    BuyCandidate,
+    SellCandidate,
+    TransferPair,
 )
 
 
@@ -190,6 +197,10 @@ def test_build_gameweek_decision_returns_full_structure() -> None:
     assert top_pair.buy.player_id == 101
     assert top_pair.priority in {"essential", "strong", "optional"}
 
+    assert decision.best_transfer is not None
+    assert decision.best_transfer in decision.transfer_recommendations
+    assert "Best single transfer" in decision.decision_summary
+
     assert decision.confidence in {"High", "Medium", "Low"}
     assert "Captain" in decision.decision_summary
     assert "Decision confidence" in decision.decision_summary
@@ -251,4 +262,96 @@ def test_build_gameweek_decision_handles_no_worthwhile_transfers() -> None:
     assert decision.transfer_recommendations == []
     assert decision.transfer_count == 0
     assert decision.buy_candidates == []
+    assert decision.best_transfer is None
     assert "No worthwhile transfers" in decision.decision_summary
+    assert "Best single transfer" not in decision.decision_summary
+
+
+# --- select_best_transfer ---------------------------------------------------
+
+
+def _make_pair(
+    pair_id: int,
+    priority: str,
+    net_improvement: float,
+) -> TransferPair:
+    sell = SellCandidate(
+        player_id=pair_id * 10,
+        web_name=f"Sell{pair_id}",
+        position_type=2,
+        team_id=1,
+        price=5.0,
+        expected_points=2.0,
+        form=3.0,
+        fixture_difficulty=3.0,
+        overall_risk=0.3,
+        availability_risk=0.0,
+        risk_level="medium",
+        sample_confidence=0.5,
+        selection_score=1.0,
+        sell_score=SellScore(
+            player_id=pair_id * 10,
+            score=3.0,
+            risk_penalty=1.0,
+            low_projection_penalty=1.0,
+            difficult_fixture_penalty=0.0,
+            availability_penalty=0.0,
+            low_confidence_penalty=1.0,
+        ),
+        rank=pair_id,
+        reasons=["Weak projected output"],
+    )
+
+    buy = BuyCandidate(
+        player_id=pair_id * 10 + 1,
+        web_name=f"Buy{pair_id}",
+        position_type=2,
+        team_id=2,
+        price=5.5,
+        expected_points=6.0,
+        form=6.0,
+        fixture_difficulty=2.0,
+        overall_risk=0.1,
+        availability_risk=0.0,
+        risk_level="low",
+        sample_confidence=1.0,
+        selection_score=1.0 + net_improvement,
+        value_score=0.1,
+        rank=pair_id,
+        reasons=["Higher expected points"],
+    )
+
+    return TransferPair(
+        sell=sell,
+        buy=buy,
+        net_improvement=net_improvement,
+        risk_change=0.2,
+        price_change=0.5,
+        within_budget=True,
+        priority=priority,
+        reasons=["Higher expected points"],
+    )
+
+
+def test_select_best_transfer_prefers_higher_priority_tier() -> None:
+    optional_big_gain = _make_pair(1, "optional", net_improvement=5.0)
+    strong_small_gain = _make_pair(2, "strong", net_improvement=1.1)
+
+    best = select_best_transfer([optional_big_gain, strong_small_gain])
+
+    assert best is strong_small_gain
+
+
+def test_select_best_transfer_breaks_ties_within_tier_by_net_improvement() -> (
+    None
+):
+    strong_a = _make_pair(1, "strong", net_improvement=1.2)
+    strong_b = _make_pair(2, "strong", net_improvement=1.8)
+
+    best = select_best_transfer([strong_a, strong_b])
+
+    assert best is strong_b
+
+
+def test_select_best_transfer_returns_none_for_empty_list() -> None:
+    assert select_best_transfer([]) is None

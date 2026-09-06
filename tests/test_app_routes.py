@@ -168,6 +168,7 @@ def make_gameweek_decision(
         buy_candidates=[pair.buy for pair in pairs],
         transfer_recommendations=pairs,
         transfer_count=len(pairs),
+        best_transfer=pairs[0] if pairs else None,
         confidence="High",
         decision_summary="Captain: Player 11 (6.0 expected points). Decision confidence: High.",
         evidence=[],
@@ -235,6 +236,7 @@ def test_valid_request_returns_deterministic_decision(
     assert [p["player_id"] for p in payload["must_play"]] == [11, 10]
     assert payload["transfer_count"] == 0
     assert payload["transfer_recommendations"] == []
+    assert payload["best_transfer"] is None
     assert payload["confidence"] == "High"
 
 
@@ -257,6 +259,9 @@ def test_response_includes_transfer_recommendation_details(
     assert recommendation["priority"] == "essential"
     assert recommendation["net_improvement"] == 9.1
     assert recommendation["reasons"]
+
+    assert payload["best_transfer"]["sell"]["player_id"] == 20
+    assert payload["best_transfer"]["buy"]["player_id"] == 21
 
     assert payload["sell_candidates"][0]["player_id"] == 20
     assert payload["buy_candidates"][0]["player_id"] == 21
@@ -349,6 +354,7 @@ def test_response_matches_deterministic_schema_and_hides_internal_fields(
         "buy_candidates",
         "transfer_recommendations",
         "transfer_count",
+        "best_transfer",
         "confidence",
         "decision_summary",
         "evidence",

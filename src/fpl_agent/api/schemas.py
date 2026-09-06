@@ -154,6 +154,7 @@ class GameweekDecisionResponse(BaseModel):
     buy_candidates: list[BuyCandidateResponse]
     transfer_recommendations: list[TransferRecommendationResponse]
     transfer_count: int
+    best_transfer: TransferRecommendationResponse | None
 
     confidence: str
     decision_summary: str
