@@ -19,6 +19,17 @@ from fpl_agent.decisions.squad_analysis import (
 _MIN_WORTHWHILE_IMPROVEMENT = 0.3
 _MAX_TEAM_PLAYERS = 3
 
+# Per-90 stats (player_metrics/projections) extrapolate raw minutes with
+# no floor, so a player with only a handful of minutes and one bonus
+# point can produce a wildly inflated points-per-90 figure (e.g. 2
+# points in 1 minute extrapolates to 180 points per 90). Real squads
+# rarely surface this since managers don't own single-minute cameo
+# players, but the wider buy-candidate pool does. Requiring at least a
+# full match's worth of minutes bounds the extrapolation multiplier to
+# roughly 1x and screens out these nonsensical candidates, without
+# touching the shared, already-validated projection formula itself.
+_MIN_POOL_MINUTES = 90
+
 
 @dataclass(frozen=True)
 class SellCandidate:
@@ -206,7 +217,7 @@ def build_available_pool_analyses(
         player
         for player in players
         if player.id not in exclude_player_ids
-        and player.minutes > 0
+        and player.minutes >= _MIN_POOL_MINUTES
         and is_player_available(player)
     ]
 

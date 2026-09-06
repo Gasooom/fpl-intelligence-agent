@@ -378,6 +378,7 @@ def _make_pool_test_player(
     element_type: int,
     team_id: int,
     minutes: int = 900,
+    total_points: int = 50,
     status: str = "a",
     can_select: bool = True,
 ) -> Player:
@@ -391,7 +392,7 @@ def _make_pool_test_player(
         status=status,
         can_select=can_select,
         now_cost=50,
-        total_points=50,
+        total_points=total_points,
         minutes=minutes,
         goals_scored=5,
         assists=5,
@@ -479,3 +480,29 @@ def test_build_available_pool_analyses_excludes_squad_unavailable_and_idle() -> 
     assert [analysis.player_id for analysis in result] == [4]
     assert result[0].position_type == 2
     assert isinstance(result[0].selection_score, float)
+
+
+def test_build_available_pool_analyses_excludes_tiny_minute_samples() -> None:
+    """A one-minute cameo with a bonus point must not distort per-90 stats.
+
+    total_points/minutes*90 has no floor, so 2 points in 1 minute would
+    otherwise extrapolate to 180 points per 90 - a nonsensical buy
+    candidate. Requiring at least one full match's worth of minutes
+    screens this out.
+    """
+    cameo_player = _make_pool_test_player(
+        5, 2, 5, minutes=1, total_points=2,
+    )
+    full_match_player = _make_pool_test_player(
+        6, 2, 6, minutes=90, total_points=8,
+    )
+
+    result = build_available_pool_analyses(
+        players=[cameo_player, full_match_player],
+        teams=_make_pool_test_teams(),
+        fixtures=_make_pool_test_fixtures(),
+        exclude_player_ids=set(),
+    )
+
+    assert [analysis.player_id for analysis in result] == [6]
+    assert result[0].selection_score < 20.0
