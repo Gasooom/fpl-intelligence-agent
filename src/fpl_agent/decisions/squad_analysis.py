@@ -71,11 +71,16 @@ def _selection_score(
     )
 
 
-def _build_player_analysis(
+def build_player_analysis(
     player: Player,
     fixture_difficulty: float,
 ) -> SquadPlayerAnalysis:
-    """Build deterministic analysis for one player."""
+    """Build deterministic analysis for one player.
+
+    Public so transfer intelligence (sell/buy analysis) can reuse the
+    exact same projection/risk/confidence/captaincy pipeline used for
+    squad selection, instead of duplicating it.
+    """
     metrics = calculate_player_metrics(player)
 
     expected_points = calculate_expected_points(
@@ -137,7 +142,7 @@ def _build_player_analysis(
     )
 
 
-def _player_fixture_difficulty(
+def player_fixture_difficulty(
     player: Player,
     teams: list[Team],
     fixtures: list[Fixture],
@@ -152,8 +157,12 @@ def _player_fixture_difficulty(
     )
 
 
-def _is_available(player: Player) -> bool:
-    """Return whether a player can be selected."""
+def is_player_available(player: Player) -> bool:
+    """Return whether a player can be selected.
+
+    Public so transfer intelligence can apply the identical
+    availability rule when building the buy-candidate pool.
+    """
     return (
         player.can_select
         and not player.removed
@@ -451,13 +460,13 @@ def build_squad_decision(
         selected_players = [
             player_by_id[player_id]
             for player_id in pick_ids
-            if _is_available(player_by_id[player_id])
+            if is_player_available(player_by_id[player_id])
         ]
     else:
         selected_players = [
             player
             for player in players
-            if _is_available(player)
+            if is_player_available(player)
         ]
 
     if len(selected_players) < 11:
@@ -466,9 +475,9 @@ def build_squad_decision(
         )
 
     analyses = [
-        _build_player_analysis(
+        build_player_analysis(
             player=player,
-            fixture_difficulty=_player_fixture_difficulty(
+            fixture_difficulty=player_fixture_difficulty(
                 player=player,
                 teams=teams,
                 fixtures=fixtures,
