@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from app.api.routes import router
 from fpl_agent.agent.context import FPLAgentContext
@@ -18,11 +21,28 @@ app = FastAPI(
 
 app.include_router(router)
 
+_DEMO_PAGE = (Path(__file__).parent / "static" / "index.html").read_text(
+    encoding="utf-8",
+)
+
 
 @app.get("/health", tags=["system"])
 async def health() -> dict[str, str]:
     """Return API health status."""
     return {"status": "ok"}
+
+
+@app.get("/", response_class=HTMLResponse, tags=["demo"])
+async def demo_page() -> str:
+    """Serve the portfolio demo page.
+
+    A single self-contained static HTML/CSS/JS file that calls the
+    existing JSON API (GET /api/v1/decision/{entry_id}) client-side
+    and renders the response. No templating engine, no additional
+    dependencies, and no decision logic here - this route only serves
+    static content and never computes anything itself.
+    """
+    return _DEMO_PAGE
 
 
 async def run_application(

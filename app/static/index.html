@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fantasy Decision Intelligence</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f6f8;
+      --panel: #ffffff;
+      --border: #e2e5ea;
+      --text: #1a1d24;
+      --muted: #6b7280;
+      --brand: #2451c9;
+      --brand-dark: #1a3a94;
+      --green: #16803c;
+      --green-bg: #e7f6ec;
+      --amber: #a15c00;
+      --amber-bg: #fdf2e0;
+      --red: #b3261e;
+      --red-bg: #fbe9e8;
+      --gray-bg: #eef0f3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      padding: 28px 20px 18px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    header h1 { margin: 0 0 4px; font-size: 1.6rem; }
+    header p.tagline { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 20px 60px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-bottom: 18px;
+    }
+    form.query {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: flex-end;
+    }
+    form.query label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    form.query input {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.95rem;
+      width: 160px;
+    }
+    form.query button {
+      background: var(--brand);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 9px 18px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    form.query button:hover { background: var(--brand-dark); }
+    form.query button:disabled { background: #9aa7c7; cursor: default; }
+    .status-line {
+      margin-top: 10px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .error-banner {
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 12px;
+      font-size: 0.9rem;
+    }
+    [hidden] { display: none !important; }
+
+    .meta-row {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .summary-text {
+      font-size: 0.98rem;
+      margin: 4px 0 0;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge.risk-low, .badge.confidence-high { background: var(--green-bg); color: var(--green); }
+    .badge.risk-medium, .badge.confidence-medium { background: var(--amber-bg); color: var(--amber); }
+    .badge.risk-high, .badge.confidence-low { background: var(--red-bg); color: var(--red); }
+    .badge.priority-essential { background: var(--red-bg); color: var(--red); }
+    .badge.priority-strong { background: var(--amber-bg); color: var(--amber); }
+    .badge.priority-optional { background: var(--gray-bg); color: var(--muted); }
+
+    h2.section-title {
+      font-size: 1.05rem;
+      margin: 0 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .captain-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 4px;
+    }
+    .captain-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      background: #fafbfd;
+    }
+    .captain-card .role { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .captain-card .name { font-size: 1.15rem; font-weight: 700; margin: 2px 0 4px; }
+    .captain-card .stats { font-size: 0.82rem; color: var(--muted); }
+
+    .position-group { margin-bottom: 10px; }
+    .position-group h3 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin: 10px 0 6px;
+    }
+    .player-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+      gap: 8px;
+    }
+    .player-card {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 0.83rem;
+    }
+    .player-card .name { font-weight: 600; margin-bottom: 2px; }
+    .player-card .row { display: flex; justify-content: space-between; color: var(--muted); }
+
+    .must-play-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .must-play-list .badge { background: var(--brand); color: #fff; padding: 4px 12px; font-size: 0.82rem; }
+    .empty-note { color: var(--muted); font-size: 0.88rem; font-style: italic; }
+
+    .best-action {
+      border: 1.5px solid var(--brand);
+      background: #eef2fc;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 14px;
+    }
+    .best-action .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--brand-dark); font-weight: 700; }
+    .best-action .move { font-size: 1.1rem; font-weight: 700; margin: 4px 0 6px; }
+    .best-action .figures { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    .best-action ul { margin: 6px 0 0; padding-left: 18px; font-size: 0.85rem; }
+
+    .transfer-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+    }
+    .transfer-card .move { font-weight: 600; font-size: 0.92rem; margin-bottom: 3px; }
+    .transfer-card .figures { font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    .transfer-card ul { margin: 4px 0 0; padding-left: 18px; font-size: 0.8rem; color: var(--muted); }
+
+    .rank-list { list-style: none; margin: 0; padding: 0; }
+    .rank-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .rank-list li:last-child { border-bottom: none; }
+    .rank-list .reasons { color: var(--muted); font-size: 0.78rem; }
+
+    footer {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 10px 20px 40px;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Fantasy Decision Intelligence</h1>
+    <p class="tagline">
+      Deterministic FPL decisions from real data. No LLM decides anything on this page.
+    </p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <form class="query" id="query-form">
+        <div>
+          <label for="entry-id">FPL Entry ID</label>
+          <input type="number" id="entry-id" min="1" placeholder="e.g. 8731757" required />
+        </div>
+        <div>
+          <label for="gameweek">Gameweek (optional)</label>
+          <input type="number" id="gameweek" min="1" placeholder="current" />
+        </div>
+        <button type="submit" id="submit-btn">Get gameweek decision</button>
+      </form>
+      <p class="status-line" id="status-line" hidden></p>
+      <p class="error-banner" id="error-banner" hidden></p>
+    </section>
+
+    <div id="results" hidden>
+      <section class="panel">
+        <div class="meta-row" id="meta-row"></div>
+        <p class="summary-text" id="summary-text"></p>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Captain &amp; Vice-Captain</h2>
+        <div class="captain-row">
+          <div class="captain-card">
+            <div class="role">Captain</div>
+            <div class="name" id="captain-name"></div>
+            <div class="stats" id="captain-stats"></div>
+          </div>
+          <div class="captain-card">
+            <div class="role">Vice-Captain</div>
+            <div class="name" id="vice-captain-name"></div>
+            <div class="stats" id="vice-captain-stats"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Starting XI</h2>
+        <div id="starting-xi"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Bench</h2>
+        <div class="player-grid" id="bench"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Must Play</h2>
+        <div id="must-play"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Transfer Intelligence</h2>
+        <div id="best-transfer"></div>
+        <div id="transfer-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2 class="section-title">Sell / Buy Candidates</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <div>
+            <h3 style="font-size:0.85rem;color:var(--muted);margin:0 0 8px;">Top sell candidates</h3>
+            <ul class="rank-list" id="sell-list"></ul>
+          </div>
+          <div>
+            <h3 style="font-size:0.85rem;color:var(--muted);margin:0 0 8px;">Top buy candidates</h3>
+            <ul class="rank-list" id="buy-list"></ul>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    Every recommendation above is produced by the deterministic decision engine only
+    (projection &rarr; risk &rarr; confidence &rarr; decision). This page performs zero
+    scoring itself - it only calls
+    <code>GET /api/v1/decision/{entry_id}</code> and renders the response.
+  </footer>
+
+  <script>
+    const POSITION_LABELS = { 1: "Goalkeeper", 2: "Defenders", 3: "Midfielders", 4: "Forwards" };
+
+    function el(id) { return document.getElementById(id); }
+
+    function riskBadge(riskLevel) {
+      return `<span class="badge risk-${riskLevel}">${riskLevel} risk</span>`;
+    }
+
+    function confidenceBadge(confidence) {
+      const key = confidence.toLowerCase();
+      return `<span class="badge confidence-${key}">${confidence} confidence</span>`;
+    }
+
+    function priorityBadge(priority) {
+      return `<span class="badge priority-${priority}">${priority}</span>`;
+    }
+
+    function playerCardHtml(player) {
+      return `
+        <div class="player-card">
+          <div class="name">${player.web_name}</div>
+          <div class="row"><span>xP</span><span>${player.expected_points}</span></div>
+          <div class="row"><span>Form</span><span>${player.form}</span></div>
+          <div class="row"><span>Fixture</span><span>${player.fixture_difficulty}</span></div>
+          <div class="row">${riskBadge(player.risk_level)}</div>
+        </div>`;
+    }
+
+    function renderStartingXI(players) {
+      const container = el("starting-xi");
+      container.innerHTML = "";
+
+      let currentPosition = null;
+      let groupDiv = null;
+      let gridDiv = null;
+
+      for (const player of players) {
+        if (player.position_type !== currentPosition) {
+          currentPosition = player.position_type;
+          groupDiv = document.createElement("div");
+          groupDiv.className = "position-group";
+          const heading = document.createElement("h3");
+          heading.textContent = POSITION_LABELS[currentPosition] || "Players";
+          groupDiv.appendChild(heading);
+          gridDiv = document.createElement("div");
+          gridDiv.className = "player-grid";
+          groupDiv.appendChild(gridDiv);
+          container.appendChild(groupDiv);
+        }
+        gridDiv.insertAdjacentHTML("beforeend", playerCardHtml(player));
+      }
+    }
+
+    function renderBench(players) {
+      const container = el("bench");
+      container.innerHTML = players.length
+        ? players.map(playerCardHtml).join("")
+        : '<p class="empty-note">No bench players returned.</p>';
+    }
+
+    function renderMustPlay(players) {
+      const container = el("must-play");
+      if (!players.length) {
+        container.innerHTML = '<p class="empty-note">No player currently clears the must-play bar (low risk, no availability doubt, adequate minutes confidence) - common early in a season when sample sizes are still small.</p>';
+        return;
+      }
+      container.innerHTML = `<div class="must-play-list">${players
+        .map((p) => `<span class="badge">${p.web_name}</span>`)
+        .join("")}</div>`;
+    }
+
+    function renderBestTransfer(bestTransfer) {
+      const container = el("best-transfer");
+      if (!bestTransfer) {
+        container.innerHTML = '<p class="empty-note">No worthwhile transfer found this gameweek - the engine only recommends moves with a meaningful projected gain.</p>';
+        return;
+      }
+      container.innerHTML = `
+        <div class="best-action">
+          <div class="label">Best single transfer</div>
+          <div class="move">${bestTransfer.sell.web_name} &rarr; ${bestTransfer.buy.web_name}</div>
+          <div class="figures">
+            <span>Expected gain: +${bestTransfer.net_improvement}</span>
+            <span>Risk change: ${bestTransfer.risk_change}</span>
+            <span>Price change: ${bestTransfer.price_change >= 0 ? "+" : ""}${bestTransfer.price_change}</span>
+            ${priorityBadge(bestTransfer.priority)}
+          </div>
+          <ul>${bestTransfer.reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+        </div>`;
+    }
+
+    function renderTransferList(recommendations) {
+      const container = el("transfer-list");
+      if (recommendations.length <= 1) {
+        container.innerHTML = "";
+        return;
+      }
+      const rest = recommendations.slice(1);
+      container.innerHTML = `<h3 style="font-size:0.85rem;color:var(--muted);margin:10px 0 8px;">Other recommended transfers</h3>` +
+        rest
+          .map(
+            (pair) => `
+        <div class="transfer-card">
+          <div class="move">${pair.sell.web_name} &rarr; ${pair.buy.web_name} ${priorityBadge(pair.priority)}</div>
+          <div class="figures">+${pair.net_improvement} expected points &middot; risk change ${pair.risk_change}</div>
+          <ul>${pair.reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+        </div>`,
+          )
+          .join("");
+    }
+
+    function renderRankList(elementId, candidates, scoreField) {
+      const container = el(elementId);
+      if (!candidates.length) {
+        container.innerHTML = '<li class="empty-note">None available.</li>';
+        return;
+      }
+      container.innerHTML = candidates
+        .slice(0, 5)
+        .map(
+          (c) => `
+        <li>
+          <span>#${c.rank} ${c.web_name}</span>
+          <span>${c[scoreField]}</span>
+        </li>
+        <li class="reasons" style="border-bottom:none;padding-top:0;">${c.reasons.join(" &middot; ")}</li>`,
+        )
+        .join("");
+    }
+
+    function renderDecision(decision) {
+      el("meta-row").innerHTML = `
+        <span>Gameweek ${decision.gameweek}</span>
+        <span>${confidenceBadge(decision.confidence)}</span>
+        <span>Engine ${decision.decision_engine_version}</span>
+        <span>Source: ${decision.data_source}</span>`;
+      el("summary-text").textContent = decision.decision_summary;
+
+      el("captain-name").textContent = decision.captain.web_name;
+      el("captain-stats").innerHTML =
+        `xP ${decision.captain.expected_points} &middot; captaincy score ${decision.captain.captaincy_score} &middot; ${riskBadge(decision.captain.risk_level)}`;
+
+      el("vice-captain-name").textContent = decision.vice_captain.web_name;
+      el("vice-captain-stats").innerHTML =
+        `xP ${decision.vice_captain.expected_points} &middot; captaincy score ${decision.vice_captain.captaincy_score} &middot; ${riskBadge(decision.vice_captain.risk_level)}`;
+
+      renderStartingXI(decision.starting_xi);
+      renderBench(decision.bench);
+      renderMustPlay(decision.must_play);
+      renderBestTransfer(decision.best_transfer);
+      renderTransferList(decision.transfer_recommendations);
+      renderRankList("sell-list", decision.sell_candidates, "score");
+      renderRankList("buy-list", decision.buy_candidates, "selection_score");
+
+      el("results").hidden = false;
+    }
+
+    async function fetchDecision(entryId, gameweek) {
+      let url = `/api/v1/decision/${entryId}`;
+      if (gameweek) {
+        url += `?gameweek=${gameweek}`;
+      }
+      const response = await fetch(url);
+      const body = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        let message = `Request failed (HTTP ${response.status}).`;
+        if (body && typeof body.detail === "string") {
+          message = body.detail;
+        } else if (body && Array.isArray(body.detail)) {
+          message = body.detail.map((e) => e.msg || JSON.stringify(e)).join("; ");
+        }
+        throw new Error(message);
+      }
+      return body;
+    }
+
+    el("query-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const entryId = el("entry-id").value.trim();
+      const gameweek = el("gameweek").value.trim();
+
+      const button = el("submit-btn");
+      const status = el("status-line");
+      const errorBanner = el("error-banner");
+
+      errorBanner.hidden = true;
+      el("results").hidden = true;
+      button.disabled = true;
+      status.hidden = false;
+      status.textContent = "Fetching real FPL data and running the deterministic engine... this calls the live FPL API and can take a few seconds.";
+
+      try {
+        const decision = await fetchDecision(entryId, gameweek);
+        renderDecision(decision);
+        status.textContent = `Loaded gameweek ${decision.gameweek} decision for entry ${entryId}.`;
+      } catch (err) {
+        status.hidden = true;
+        errorBanner.hidden = false;
+        errorBanner.textContent = err.message || "Something went wrong fetching this decision.";
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
