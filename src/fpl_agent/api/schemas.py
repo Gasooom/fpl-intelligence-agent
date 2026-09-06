@@ -23,6 +23,7 @@ class PlayerDecisionResponse(BaseModel):
     expected_points: float
 
     minutes_risk: float
+    availability_risk: float
     overall_risk: float
     risk_level: str
 
@@ -39,9 +40,9 @@ class SquadDecisionResponse(BaseModel):
         max_length=11,
     )
     bench: list[PlayerDecisionResponse] = Field(
-        min_length=4,
+        min_length=0,
         max_length=4,
     )
     captain: PlayerDecisionResponse
     vice_captain: PlayerDecisionResponse
-    must_play: list[PlayerDecisionResponse]
+    must_play: list[PlayerDecisionResponse] 

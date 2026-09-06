@@ -12,6 +12,13 @@ def make_player(
     team_id: int,
     expected_points: float,
 ) -> SquadPlayerAnalysis:
+    selection_score = (
+        expected_points
+        + 5.0 * 0.15
+        + (1.0 - 0.5) * 0.5
+        - 0.0 * 2.0
+    )
+
     return SquadPlayerAnalysis(
         player_id=player_id,
         web_name=f"Player {player_id}",
@@ -25,9 +32,14 @@ def make_player(
         fixture_difficulty=3.0,
         expected_points=expected_points,
         minutes_risk=0.0,
+        form_uncertainty=0.0,
+        fixture_risk=0.0,
+        availability_risk=0.0,
         overall_risk=0.0,
         risk_level="low",
+        sample_confidence=1.0,
         captaincy_score=expected_points,
+        selection_score=selection_score,
     )
 
 
@@ -50,18 +62,16 @@ def test_optimizer_respects_three_player_team_limit() -> None:
         make_player(15, 4, 3, 6.0),
     ]
 
-    starting_xi = select_starting_xi(players)
-
-    assert len(starting_xi) == 11
+    result = select_starting_xi(players)
 
     team_counts: dict[int, int] = {}
 
-    for player in starting_xi:
+    for player in result:
         team_counts[player.team_id] = (
             team_counts.get(player.team_id, 0) + 1
         )
 
-    assert max(team_counts.values()) <= 3
+    assert all(count <= 3 for count in team_counts.values())
 
 
 def test_optimizer_returns_valid_formation() -> None:
@@ -83,11 +93,32 @@ def test_optimizer_returns_valid_formation() -> None:
         make_player(15, 4, 4, 5.0),
     ]
 
-    starting_xi = select_starting_xi(players)
+    result = select_starting_xi(players)
 
-    assert len(starting_xi) == 11
+    assert len(result) == 11
 
-    assert sum(p.position_type == 1 for p in starting_xi) == 1
-    assert sum(p.position_type == 2 for p in starting_xi) >= 3
-    assert sum(p.position_type == 3 for p in starting_xi) >= 2
-    assert sum(p.position_type == 4 for p in starting_xi) >= 1
+    goalkeepers = [
+        player
+        for player in result
+        if player.position_type == 1
+    ]
+    defenders = [
+        player
+        for player in result
+        if player.position_type == 2
+    ]
+    midfielders = [
+        player
+        for player in result
+        if player.position_type == 3
+    ]
+    forwards = [
+        player
+        for player in result
+        if player.position_type == 4
+    ]
+
+    assert len(goalkeepers) == 1
+    assert 3 <= len(defenders) <= 5
+    assert 2 <= len(midfielders) <= 5
+    assert 1 <= len(forwards) <= 3

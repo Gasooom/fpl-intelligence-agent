@@ -4,16 +4,17 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from fpl_agent.analysis.captaincy_scoring import score_captaincy_candidate
+from fpl_agent.analysis.confidence import calculate_sample_confidence
 from fpl_agent.analysis.fixture_analysis import average_fixture_difficulty
 from fpl_agent.analysis.player_metrics import calculate_player_metrics
-from fpl_agent.analysis.projections import project_player
+from fpl_agent.analysis.projections import calculate_expected_points
 from fpl_agent.analysis.risk_signals import calculate_risk_signals
-from fpl_agent.data.models import Fixture, Player, SquadPick
+from fpl_agent.data.models import Fixture, Player, SquadPick, Team
 
 
 @dataclass(frozen=True)
 class SquadPlayerAnalysis:
-    """Deterministic analysis of a player in the user's squad."""
+    """Deterministic analysis of one squad player."""
 
     player_id: int
     web_name: str
@@ -30,15 +31,20 @@ class SquadPlayerAnalysis:
     expected_points: float
 
     minutes_risk: float
+    form_uncertainty: float
+    fixture_risk: float
+    availability_risk: float
     overall_risk: float
     risk_level: str
 
+    sample_confidence: float
     captaincy_score: float
+    selection_score: float
 
 
 @dataclass(frozen=True)
 class SquadDecision:
-    """Deterministic starting XI and captaincy decision."""
+    """Deterministic squad decision."""
 
     starting_xi: list[SquadPlayerAnalysis]
     bench: list[SquadPlayerAnalysis]
@@ -47,22 +53,32 @@ class SquadDecision:
     must_play: list[SquadPlayerAnalysis]
 
 
-def analyze_squad_player(
-    player: Player,
-    fixtures: list[Fixture],
-    fixture_horizon: int = 1,
-) -> SquadPlayerAnalysis:
-    """Build deterministic decision metrics for a squad player."""
-    metrics = calculate_player_metrics(player)
+def _selection_score(
+    expected_points: float,
+    form: float,
+    sample_confidence: float,
+    overall_risk: float,
+) -> float:
+    """Calculate a bounded deterministic player-selection score."""
+    confidence_bonus = (sample_confidence - 0.5) * 0.5
 
-    fixture_difficulty = average_fixture_difficulty(
-        fixtures=fixtures,
-        team_id=player.team,
-        limit=fixture_horizon,
+    return round(
+        expected_points
+        + form * 0.15
+        + confidence_bonus
+        - overall_risk * 2.0,
+        2,
     )
 
-    projection = project_player(
-        player_id=player.id,
+
+def _build_player_analysis(
+    player: Player,
+    fixture_difficulty: float,
+) -> SquadPlayerAnalysis:
+    """Build deterministic analysis for one player."""
+    metrics = calculate_player_metrics(player)
+
+    expected_points = calculate_expected_points(
         points_per_game=metrics.points_per_game,
         points_per_90=metrics.points_per_90,
         xgi_per_90=metrics.xgi_per_90,
@@ -73,13 +89,28 @@ def analyze_squad_player(
         minutes=player.minutes,
         form=metrics.form,
         fixture_difficulty=fixture_difficulty,
+        status=player.status,
+        chance_of_playing=player.chance_of_playing_next_round,
+        can_select=player.can_select,
+        removed=player.removed,
+    )
+
+    confidence = calculate_sample_confidence(
+        minutes=player.minutes,
     )
 
     captaincy = score_captaincy_candidate(
         player_id=player.id,
-        expected_points=projection.expected_points,
+        expected_points=expected_points,
         form=metrics.form,
         fixture_difficulty=fixture_difficulty,
+    )
+
+    selection_score = _selection_score(
+        expected_points=expected_points,
+        form=metrics.form,
+        sample_confidence=confidence.score,
+        overall_risk=risk.overall_risk,
     )
 
     return SquadPlayerAnalysis(
@@ -93,315 +124,369 @@ def analyze_squad_player(
         points_per_90=metrics.points_per_90,
         xgi_per_90=metrics.xgi_per_90,
         fixture_difficulty=fixture_difficulty,
-        expected_points=projection.expected_points,
+        expected_points=expected_points,
         minutes_risk=risk.minutes_risk,
+        form_uncertainty=risk.form_uncertainty,
+        fixture_risk=risk.fixture_risk,
+        availability_risk=risk.availability_risk,
         overall_risk=risk.overall_risk,
         risk_level=risk.risk_level,
+        sample_confidence=confidence.score,
         captaincy_score=captaincy.score,
+        selection_score=selection_score,
     )
 
 
-def _selection_score(player: SquadPlayerAnalysis) -> float:
-    """Return the deterministic score used for XI selection."""
-    risk_penalty = player.overall_risk * 2.0
+def _player_fixture_difficulty(
+    player: Player,
+    teams: list[Team],
+    fixtures: list[Fixture],
+) -> float:
+    """Return the average difficulty of the player's next fixture."""
+    del teams
 
+    return average_fixture_difficulty(
+        team_id=player.team,
+        fixtures=fixtures,
+        limit=1,
+    )
+
+
+def _is_available(player: Player) -> bool:
+    """Return whether a player can be selected."""
     return (
-        player.expected_points
-        + player.form * 0.15
-        - risk_penalty
+        player.can_select
+        and not player.removed
+        and player.status not in {"i", "s", "u"}
+        and player.chance_of_playing_next_round != 0
     )
 
 
-def _valid_team_limits(
-    selected: list[SquadPlayerAnalysis],
+def _normalize_pick_ids(
+    picks: list[SquadPick] | list[int],
+) -> list[int]:
+    """Normalize FPL pick objects or raw player IDs to player IDs."""
+    normalized: list[int] = []
+
+    for pick in picks:
+        if isinstance(pick, int):
+            normalized.append(pick)
+        else:
+            normalized.append(pick.element)
+
+    return normalized
+
+
+def select_captains(
+    analyses: list[SquadPlayerAnalysis],
+) -> tuple[SquadPlayerAnalysis, SquadPlayerAnalysis]:
+    """Select captain and vice-captain deterministically."""
+    ranked = sorted(
+        analyses,
+        key=lambda player: (
+            player.captaincy_score,
+            player.expected_points,
+            player.selection_score,
+        ),
+        reverse=True,
+    )
+
+    if len(ranked) < 2:
+        raise ValueError(
+            "At least two players are required for captain selection.",
+        )
+
+    return ranked[0], ranked[1]
+
+
+def select_must_play(
+    analyses: list[SquadPlayerAnalysis],
+) -> list[SquadPlayerAnalysis]:
+    """Select players with strong availability, confidence, and low risk."""
+    candidates = [
+        player
+        for player in analyses
+        if player.availability_risk == 0.0
+        and player.overall_risk < 0.4
+        and player.sample_confidence >= 0.5
+    ]
+
+    return sorted(
+        candidates,
+        key=lambda player: player.selection_score,
+        reverse=True,
+    )
+
+
+def _validate_team_limit(
+    players: list[SquadPlayerAnalysis],
 ) -> bool:
-    """Check the FPL three-player-per-team constraint."""
+    """Ensure no more than three players come from one FPL team."""
     team_counts: dict[int, int] = {}
 
-    for player in selected:
+    for player in players:
         team_counts[player.team_id] = (
             team_counts.get(player.team_id, 0) + 1
         )
 
-        if team_counts[player.team_id] > 3:
-            return False
-
-    return True
+    return all(count <= 3 for count in team_counts.values())
 
 
-def _valid_formation(
-    selected: list[SquadPlayerAnalysis],
+def _validate_formation(
+    players: list[SquadPlayerAnalysis],
 ) -> bool:
-    """Check whether an XI satisfies basic FPL formation rules."""
-    if len(selected) != 11:
-        return False
+    """Ensure the starting XI follows valid FPL formation rules."""
+    position_counts: dict[int, int] = {}
 
-    goalkeeper_count = sum(
-        player.position_type == 1
-        for player in selected
-    )
-    defender_count = sum(
-        player.position_type == 2
-        for player in selected
-    )
-    midfielder_count = sum(
-        player.position_type == 3
-        for player in selected
-    )
-    forward_count = sum(
-        player.position_type == 4
-        for player in selected
-    )
+    for player in players:
+        position_counts[player.position_type] = (
+            position_counts.get(player.position_type, 0) + 1
+        )
 
     return (
-        goalkeeper_count == 1
-        and 3 <= defender_count <= 5
-        and 2 <= midfielder_count <= 5
-        and 1 <= forward_count <= 3
-    )
-
-
-def _candidate_score(
-    candidate: tuple[SquadPlayerAnalysis, ...],
-) -> float:
-    """Return the total deterministic score for an XI candidate."""
-    return sum(
-        _selection_score(player)
-        for player in candidate
+        position_counts.get(1, 0) == 1
+        and 3 <= position_counts.get(2, 0) <= 5
+        and 2 <= position_counts.get(3, 0) <= 5
+        and 1 <= position_counts.get(4, 0) <= 3
     )
 
 
 def select_starting_xi(
-    players: list[SquadPlayerAnalysis],
+    analyses: list[SquadPlayerAnalysis],
 ) -> list[SquadPlayerAnalysis]:
-    """Select the highest-scoring valid FPL starting XI."""
-    goalkeepers = [
-        player
-        for player in players
-        if player.position_type == 1
-    ]
+    """Select the strongest valid FPL starting XI."""
+    goalkeepers = sorted(
+        [
+            player
+            for player in analyses
+            if player.position_type == 1
+        ],
+        key=lambda player: player.selection_score,
+        reverse=True,
+    )
 
-    defenders = [
-        player
-        for player in players
-        if player.position_type == 2
-    ]
+    defenders = sorted(
+        [
+            player
+            for player in analyses
+            if player.position_type == 2
+        ],
+        key=lambda player: player.selection_score,
+        reverse=True,
+    )
 
-    midfielders = [
-        player
-        for player in players
-        if player.position_type == 3
-    ]
+    midfielders = sorted(
+        [
+            player
+            for player in analyses
+            if player.position_type == 3
+        ],
+        key=lambda player: player.selection_score,
+        reverse=True,
+    )
 
-    forwards = [
-        player
-        for player in players
-        if player.position_type == 4
-    ]
+    forwards = sorted(
+        [
+            player
+            for player in analyses
+            if player.position_type == 4
+        ],
+        key=lambda player: player.selection_score,
+        reverse=True,
+    )
 
     if not goalkeepers:
-        raise ValueError(
-            "Unable to build a valid starting XI: "
-            "the squad contains no goalkeeper."
-        )
+        raise ValueError("No goalkeeper available.")
 
-    best_xi: tuple[SquadPlayerAnalysis, ...] | None = None
+    if len(defenders) < 3:
+        raise ValueError("At least three defenders are required.")
+
+    if len(midfielders) < 2:
+        raise ValueError("At least two midfielders are required.")
+
+    if not forwards:
+        raise ValueError("At least one forward is required.")
+
+    best_xi: list[SquadPlayerAnalysis] | None = None
     best_score = float("-inf")
 
     for goalkeeper in goalkeepers:
-        for defender_count in range(3, 6):
-            for midfielder_count in range(2, 6):
+        for defender_count in range(
+            3,
+            min(5, len(defenders)) + 1,
+        ):
+            for midfielder_count in range(
+                2,
+                min(5, len(midfielders)) + 1,
+            ):
                 forward_count = (
-                    10
+                    11
+                    - 1
                     - defender_count
                     - midfielder_count
                 )
 
-                if not 1 <= forward_count <= 3:
+                if forward_count < 1 or forward_count > 3:
                     continue
 
-                if (
-                    len(defenders) < defender_count
-                    or len(midfielders) < midfielder_count
-                    or len(forwards) < forward_count
-                ):
+                if forward_count > len(forwards):
                     continue
 
-                defender_combinations = combinations(
+                for defender_combo in combinations(
                     defenders,
                     defender_count,
-                )
-
-                for defender_group in defender_combinations:
-                    midfielder_combinations = combinations(
+                ):
+                    for midfielder_combo in combinations(
                         midfielders,
                         midfielder_count,
-                    )
-
-                    for midfielder_group in midfielder_combinations:
-                        forward_combinations = combinations(
+                    ):
+                        for forward_combo in combinations(
                             forwards,
                             forward_count,
-                        )
-
-                        for forward_group in forward_combinations:
-                            candidate = (
+                        ):
+                            lineup = [
                                 goalkeeper,
-                                *defender_group,
-                                *midfielder_group,
-                                *forward_group,
+                                *defender_combo,
+                                *midfielder_combo,
+                                *forward_combo,
+                            ]
+
+                            if not _validate_formation(lineup):
+                                continue
+
+                            if not _validate_team_limit(lineup):
+                                continue
+
+                            score = sum(
+                                player.selection_score
+                                for player in lineup
                             )
-
-                            if not _valid_formation(
-                                list(candidate)
-                            ):
-                                continue
-
-                            if not _valid_team_limits(
-                                list(candidate)
-                            ):
-                                continue
-
-                            score = _candidate_score(candidate)
 
                             if score > best_score:
                                 best_score = score
-                                best_xi = candidate
+                                best_xi = lineup
 
     if best_xi is None:
         raise ValueError(
-            "Unable to build a valid starting XI from "
-            "the supplied squad."
+            "Unable to construct a valid starting XI.",
         )
 
-    return sorted(
-        best_xi,
-        key=lambda player: (
-            player.position_type,
-            -_selection_score(player),
-        ),
-    )
+    return best_xi
 
 
 def select_bench(
-    players: list[SquadPlayerAnalysis],
+    analyses: list[SquadPlayerAnalysis],
     starting_xi: list[SquadPlayerAnalysis],
 ) -> list[SquadPlayerAnalysis]:
-    """Order the bench deterministically."""
+    """Select the strongest valid bench in FPL order."""
     starting_ids = {
         player.player_id
         for player in starting_xi
     }
 
-    substitutes = [
+    remaining = [
         player
-        for player in players
+        for player in analyses
         if player.player_id not in starting_ids
     ]
 
-    goalkeeper = [
-        player
-        for player in substitutes
-        if player.position_type == 1
-    ]
-
-    outfield = sorted(
-        (
+    goalkeepers = sorted(
+        [
             player
-            for player in substitutes
-            if player.position_type != 1
-        ),
-        key=_selection_score,
+            for player in remaining
+            if player.position_type == 1
+        ],
+        key=lambda player: player.selection_score,
         reverse=True,
     )
 
-    return outfield[:3] + goalkeeper[:1]
-
-
-def select_captain(
-    starting_xi: list[SquadPlayerAnalysis],
-) -> SquadPlayerAnalysis:
-    """Select the highest-scoring captain from the starting XI."""
-    return max(
-        starting_xi,
-        key=lambda player: (
-            player.captaincy_score,
-            player.expected_points,
-            -player.overall_risk,
-        ),
+    outfield = sorted(
+        [
+            player
+            for player in remaining
+            if player.position_type != 1
+        ],
+        key=lambda player: player.selection_score,
+        reverse=True,
     )
 
+    bench: list[SquadPlayerAnalysis] = []
 
-def select_vice_captain(
-    starting_xi: list[SquadPlayerAnalysis],
-    captain: SquadPlayerAnalysis,
-) -> SquadPlayerAnalysis:
-    """Select the second-best captaincy candidate."""
-    candidates = [
-        player
-        for player in starting_xi
-        if player.player_id != captain.player_id
-    ]
+    if goalkeepers:
+        bench.append(goalkeepers[0])
 
-    return max(
-        candidates,
-        key=lambda player: (
-            player.captaincy_score,
-            player.expected_points,
-            -player.overall_risk,
-        ),
+    bench.extend(
+        outfield[: 4 - len(bench)],
     )
+
+    return bench
 
 
 def build_squad_decision(
     players: list[Player],
-    picks: list[SquadPick],
+    teams: list[Team],
     fixtures: list[Fixture],
-    fixture_horizon: int = 1,
+    picks: list[SquadPick] | list[int] | None = None,
 ) -> SquadDecision:
-    """Analyze the squad and build a deterministic gameweek decision."""
-    player_by_id = {
-        player.id: player
-        for player in players
-    }
+    """Build a deterministic squad decision."""
+    if picks is not None:
+        pick_ids = _normalize_pick_ids(picks)
 
-    squad_players: list[SquadPlayerAnalysis] = []
+        player_by_id = {
+            player.id: player
+            for player in players
+        }
 
-    for pick in picks:
-        player = player_by_id.get(pick.element)
+        unknown_ids = [
+            player_id
+            for player_id in pick_ids
+            if player_id not in player_by_id
+        ]
 
-        if player is None:
+        if unknown_ids:
             raise ValueError(
-                f"Squad player {pick.element} was not found "
-                "in FPL data."
+                f"Unknown player IDs: {unknown_ids}",
             )
 
-        squad_players.append(
-            analyze_squad_player(
-                player=player,
-                fixtures=fixtures,
-                fixture_horizon=fixture_horizon,
-            )
-        )
+        selected_players = [
+            player_by_id[player_id]
+            for player_id in pick_ids
+            if _is_available(player_by_id[player_id])
+        ]
+    else:
+        selected_players = [
+            player
+            for player in players
+            if _is_available(player)
+        ]
 
-    if len(squad_players) != 15:
+    if len(selected_players) < 11:
         raise ValueError(
-            "An FPL squad must contain exactly 15 players."
+            "At least 11 selectable players are required.",
         )
 
-    starting_xi = select_starting_xi(squad_players)
-    bench = select_bench(squad_players, starting_xi)
-    captain = select_captain(starting_xi)
-    vice_captain = select_vice_captain(
-        starting_xi,
-        captain,
+    analyses = [
+        _build_player_analysis(
+            player=player,
+            fixture_difficulty=_player_fixture_difficulty(
+                player=player,
+                teams=teams,
+                fixtures=fixtures,
+            ),
+        )
+        for player in selected_players
+    ]
+
+    starting_xi = select_starting_xi(analyses)
+
+    bench = select_bench(
+        analyses=analyses,
+        starting_xi=starting_xi,
     )
 
-    must_play = [
-        player
-        for player in starting_xi
-        if player.overall_risk < 0.4
-    ]
+    captain, vice_captain = select_captains(starting_xi)
+
+    must_play = select_must_play(starting_xi)
 
     return SquadDecision(
         starting_xi=starting_xi,

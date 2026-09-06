@@ -27,6 +27,7 @@ def _player_to_response(
         fixture_difficulty=player.fixture_difficulty,
         expected_points=player.expected_points,
         minutes_risk=player.minutes_risk,
+        availability_risk=player.availability_risk,
         overall_risk=player.overall_risk,
         risk_level=player.risk_level,
         captaincy_score=player.captaincy_score,

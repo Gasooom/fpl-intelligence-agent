@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Player(BaseModel):
@@ -13,6 +13,14 @@ class Player(BaseModel):
 
     team: int
     element_type: int
+
+    status: str = "a"
+    chance_of_playing_next_round: int | None = None
+    chance_of_playing_this_round: int | None = None
+    news: str = ""
+    can_select: bool = True
+    can_transact: bool = True
+    removed: bool = False
 
     now_cost: int
     total_points: int
@@ -145,9 +153,7 @@ class SquadPick(BaseModel):
     multiplier: int
     is_captain: bool
     is_vice_captain: bool
-    selling_price: int
-    purchase_price: int
-    purchase_event: int
+    element_type: int
 
 
 class SquadPicksResponse(BaseModel):
@@ -156,6 +162,10 @@ class SquadPicksResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     active_chip: str | None = None
+    automatic_subs: list[dict[str, object]] = Field(
+        default_factory=list,
+    )
     picks: list[SquadPick]
-    entry_history: dict[str, object] = {}
-    subs: list[dict[str, object]] = []
+    entry_history: dict[str, object] = Field(
+        default_factory=dict,
+    )

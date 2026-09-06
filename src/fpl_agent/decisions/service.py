@@ -38,8 +38,9 @@ class FPLDecisionService:
 
         return build_squad_decision(
             players=bootstrap.elements,
-            picks=picks_response.picks,
+            teams=bootstrap.teams,
             fixtures=fixtures,
+            picks=picks_response.picks,
         )
 
     @staticmethod
@@ -50,11 +51,16 @@ class FPLDecisionService:
         """Resolve the requested gameweek or the current FPL gameweek."""
         if requested_gameweek is not None:
             if requested_gameweek < 1:
-                raise ValueError("Gameweek must be greater than zero.")
-
-            if not any(event.id == requested_gameweek for event in events):
                 raise ValueError(
-                    f"Gameweek {requested_gameweek} was not found."
+                    "Gameweek must be greater than zero.",
+                )
+
+            if not any(
+                event.id == requested_gameweek
+                for event in events
+            ):
+                raise ValueError(
+                    f"Gameweek {requested_gameweek} was not found.",
                 )
 
             return requested_gameweek
@@ -78,5 +84,5 @@ class FPLDecisionService:
             return next_events[0].id
 
         raise ValueError(
-            "Unable to determine the current or next gameweek."
+            "Unable to determine the current or next gameweek.",
         )
