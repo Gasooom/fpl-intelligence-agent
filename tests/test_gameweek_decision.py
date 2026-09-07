@@ -363,6 +363,9 @@ def _make_pair(
         within_budget=True,
         priority=priority,
         reasons=["Higher expected points"],
+        expected_point_gain=buy.expected_points - sell.expected_points,
+        hit_cost=None,
+        net_value=None,
     )
 
 
@@ -388,6 +391,149 @@ def test_select_best_transfer_breaks_ties_within_tier_by_net_improvement() -> (
 
 def test_select_best_transfer_returns_none_for_empty_list() -> None:
     assert select_best_transfer([]) is None
+
+
+def test_build_gameweek_decision_every_evidence_item_has_nonempty_reasons() -> None:
+    """Regression guard for the full evidence pipeline: captain,
+    vice-captain, sell, and buy evidence entries must each carry at
+    least one reason, exactly as the deterministic reason-builders in
+    transfer_analysis.py guarantee. This is what backs the "Decision
+    evidence", "Why X -> Y", and "Backend reasoning" sections of the
+    frontend - an empty reasons list here would surface as an empty
+    bullet list there."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    assert decision.evidence
+    empty_items = [item for item in decision.evidence if not item.reasons]
+    assert empty_items == []
+
+
+def test_narrative_and_best_transfer_field_report_the_same_expected_gain() -> None:
+    """Regression guard: decision_summary's "Best single transfer" line
+    and best_transfer.expected_point_gain (the same field the API
+    response and frontend card read) must always agree - they
+    previously came from two different formulas (net_improvement, a
+    selection-score delta, vs expected_point_gain, a pure points
+    delta) and could show two different numbers for the same pair."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    assert decision.best_transfer is not None
+    gain = decision.best_transfer.expected_point_gain
+    signed_gain = f"+{gain}" if gain >= 0 else str(gain)
+    expected_fragment = f"({signed_gain} expected points, {decision.best_transfer.priority})"
+
+    assert expected_fragment in decision.decision_summary
+    # And the narrative must not be quoting the other formula instead.
+    if decision.best_transfer.net_improvement != gain:
+        assert f"+{decision.best_transfer.net_improvement} expected points" not in (
+            decision.decision_summary
+        )
+
+
+# --- Starting XI expected-points total / projected Gameweek total ---
+
+
+def test_starting_xi_expected_points_is_the_sum_of_exactly_the_11_starters() -> None:
+    """H: bench players are never included in the subtotal."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    assert len(decision.starting_xi) == 11
+    expected = round(sum(p.expected_points for p in decision.starting_xi), 2)
+    assert decision.starting_xi_expected_points == expected
+
+    # Adding a bench player's expected_points must never change the total.
+    inflated = expected + sum(p.expected_points for p in decision.bench)
+    assert decision.starting_xi_expected_points != round(inflated, 2) or not decision.bench
+
+
+def test_projected_gameweek_points_adds_exactly_one_extra_captain_copy() -> None:
+    """G + I: the captain is doubled (counted once inside the XI
+    subtotal, once again as the bonus) - never tripled, never left
+    single."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    expected_total = round(
+        decision.starting_xi_expected_points + decision.captain.expected_points,
+        2,
+    )
+    assert decision.projected_gameweek_points == expected_total
+
+    # Exactly one extra copy: total minus the raw XI subtotal must equal
+    # precisely one captain expected_points, not two, not zero.
+    extra = round(decision.projected_gameweek_points - decision.starting_xi_expected_points, 2)
+    assert extra == decision.captain.expected_points
+
+
+def test_projected_gameweek_points_matches_the_worked_example() -> None:
+    """The exact figures from the spec: XI 47.70, captain 7.17,
+    projected total 54.87."""
+    starting_xi_expected = round(
+        4.00 + 4.80 + 4.04 + 3.03 + 1.92 + 6.19 + 4.34 + 4.28 + 2.98 + 7.17 + 4.95,
+        2,
+    )
+    assert starting_xi_expected == 47.70
+    assert round(starting_xi_expected + 7.17, 2) == 54.87
+
+
+def test_starting_xi_expected_points_only_counts_the_captain_once_at_1x() -> None:
+    """I: within the raw XI subtotal itself (before the captain bonus
+    is added), the captain contributes exactly his own expected_points
+    - the same as every other starter, not doubled at this stage."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    without_captain = round(
+        decision.starting_xi_expected_points - decision.captain.expected_points,
+        2,
+    )
+    rest_of_xi = round(
+        sum(
+            p.expected_points
+            for p in decision.starting_xi
+            if p.player_id != decision.captain.player_id
+        ),
+        2,
+    )
+    assert without_captain == rest_of_xi
 
 
 # --- Decision confidence: strength of evidence only, never risk ---

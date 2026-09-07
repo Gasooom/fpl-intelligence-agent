@@ -26,8 +26,18 @@ from fpl_agent.decisions.transfer_analysis import (
 
 def _player_to_response(
     player: SquadPlayerAnalysis,
+    captain_player_id: int,
 ) -> PlayerDecisionResponse:
-    """Convert an internal deterministic analysis to an API response."""
+    """Convert an internal deterministic analysis to an API response.
+
+    `captain_player_id` is the id of whichever player the deterministic
+    engine actually selected as captain for this decision - it is the
+    only input that decides whether the FPL 2x multiplier applies to
+    `effective_points`. See PlayerDecisionResponse.effective_points for
+    the exact rule.
+    """
+    is_captain = player.player_id == captain_player_id
+
     return PlayerDecisionResponse(
         player_id=player.player_id,
         web_name=player.web_name,
@@ -45,6 +55,9 @@ def _player_to_response(
         overall_risk=player.overall_risk,
         risk_level=player.risk_level,
         captaincy_score=player.captaincy_score,
+        effective_points=(
+            round(player.expected_points * 2, 2) if is_captain else player.expected_points
+        ),
     )
 
 
@@ -52,19 +65,21 @@ def squad_decision_to_response(
     decision: SquadDecision,
 ) -> SquadDecisionResponse:
     """Convert a deterministic squad decision to an API response."""
+    captain_player_id = decision.captain.player_id
+
     return SquadDecisionResponse(
         starting_xi=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.starting_xi
         ],
         bench=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.bench
         ],
-        captain=_player_to_response(decision.captain),
-        vice_captain=_player_to_response(decision.vice_captain),
+        captain=_player_to_response(decision.captain, captain_player_id),
+        vice_captain=_player_to_response(decision.vice_captain, captain_player_id),
         must_play=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.must_play
         ],
     )
@@ -131,6 +146,9 @@ def _transfer_pair_to_response(
         within_budget=pair.within_budget,
         priority=pair.priority,
         reasons=pair.reasons,
+        expected_point_gain=pair.expected_point_gain,
+        hit_cost=pair.hit_cost,
+        net_value=pair.net_value,
     )
 
 
@@ -150,23 +168,25 @@ def gameweek_decision_to_response(
     decision: GameweekDecision,
 ) -> GameweekDecisionResponse:
     """Convert the unified deterministic gameweek decision to an API response."""
+    captain_player_id = decision.captain.player_id
+
     return GameweekDecisionResponse(
         gameweek=decision.gameweek,
         generated_at=decision.generated_at,
         decision_engine_version=decision.decision_engine_version,
         data_source=decision.data_source,
         starting_xi=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.starting_xi
         ],
         bench=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.bench
         ],
-        captain=_player_to_response(decision.captain),
-        vice_captain=_player_to_response(decision.vice_captain),
+        captain=_player_to_response(decision.captain, captain_player_id),
+        vice_captain=_player_to_response(decision.vice_captain, captain_player_id),
         must_play=[
-            _player_to_response(player)
+            _player_to_response(player, captain_player_id)
             for player in decision.must_play
         ],
         sell_candidates=[
@@ -187,6 +207,10 @@ def gameweek_decision_to_response(
             if decision.best_transfer is not None
             else None
         ),
+        free_transfers_available=decision.free_transfers_available,
+        in_the_bank=decision.in_the_bank,
+        starting_xi_expected_points=decision.starting_xi_expected_points,
+        projected_gameweek_points=decision.projected_gameweek_points,
         confidence=decision.confidence,
         decision_summary=decision.decision_summary,
         evidence=[

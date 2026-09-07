@@ -371,13 +371,16 @@ def test_build_transfer_pairs_within_budget_reflects_entry_bank() -> None:
     )
     assert affordable[0].within_budget is True
 
+    # A transfer the manager cannot actually fund is not an actionable
+    # recommendation: with no affordable alternative in the pool, no
+    # pair is produced at all rather than one flagged within_budget=False.
     unaffordable = build_transfer_pairs(
         sell_candidates=sell_candidates,
         pool_analyses=pool,
         squad_analyses=squad,
         entry_bank=0.5,
     )
-    assert unaffordable[0].within_budget is False
+    assert unaffordable == []
 
     unknown_budget = build_transfer_pairs(
         sell_candidates=sell_candidates,
@@ -538,3 +541,281 @@ def test_build_available_pool_analyses_excludes_tiny_minute_samples() -> None:
 
     assert [analysis.player_id for analysis in result] == [6]
     assert result[0].selection_score < 20.0
+
+
+# --- Regression: reasons/evidence must never be empty ----------------------
+#
+# _build_sell_reasons, _build_buy_reasons, and _build_pair_reasons each
+# derive their bullet text from conditional signals (risk penalties,
+# comparative advantages, etc.). Every one of them has an explicit
+# fallback string for the case where every conditional signal is
+# false/zero, so the UI never has to render an empty bullet list. These
+# tests exercise those fallback paths directly rather than assuming
+# they work.
+
+
+def test_sell_candidate_reasons_falls_back_when_every_penalty_signal_is_zero() -> None:
+    """A "perfect" player (zero risk, zero availability doubt, strong
+    projection, full confidence, easy fixture) has every sell-score
+    penalty at exactly zero - rank_sell_candidates must still return a
+    non-empty, honest reasons list via the documented fallback rather
+    than an empty array."""
+    perfect_player = make_analysis(
+        1,
+        "Perfect",
+        3,
+        1,
+        expected_points=6.0,
+        overall_risk=0.0,
+        availability_risk=0.0,
+        sample_confidence=0.5,
+        fixture_difficulty=3.0,
+    )
+
+    ranked = rank_sell_candidates([perfect_player])
+
+    assert ranked[0].reasons == ["Weakest deterministic selection score in the squad"]
+
+
+def test_buy_candidate_reasons_are_never_empty() -> None:
+    """_build_buy_reasons always leads with the player's expected
+    points, so rank_buy_candidates can never return an empty reasons
+    list regardless of fixture/confidence/risk/form."""
+    weak_pool_player = make_analysis(
+        1,
+        "Weak",
+        3,
+        1,
+        expected_points=0.0,
+        overall_risk=0.9,
+        sample_confidence=0.1,
+        fixture_difficulty=5.0,
+        form=0.0,
+    )
+
+    ranked = rank_buy_candidates([weak_pool_player], position_type=3, limit=10)
+
+    assert ranked[0].reasons
+    assert ranked[0].reasons[0] == "Expected points: 0.0"
+
+
+def test_every_accepted_transfer_pair_has_nonempty_reasons() -> None:
+    """Sweeps a realistic multi-position squad/pool through the full
+    ranking + pairing pipeline and asserts every pair the engine
+    actually recommends carries at least one reason - the same
+    invariant the UI's "Why X -> Y" and "Other transfer options"
+    sections depend on."""
+    squad = [
+        make_analysis(1, "WeakGK", 1, 1, expected_points=1.0, overall_risk=0.6),
+        make_analysis(2, "WeakDef", 2, 2, expected_points=1.0, overall_risk=0.7),
+        make_analysis(3, "WeakMid", 3, 3, expected_points=1.5, overall_risk=0.5),
+        make_analysis(4, "WeakFwd", 4, 4, expected_points=1.0, overall_risk=0.8),
+    ]
+    pool = [
+        make_analysis(10, "StrongGK", 1, 10, expected_points=6.0, overall_risk=0.1),
+        make_analysis(11, "StrongDef", 2, 11, expected_points=8.0, overall_risk=0.1),
+        make_analysis(12, "StrongMid", 3, 12, expected_points=9.0, overall_risk=0.1),
+        make_analysis(13, "StrongFwd", 4, 13, expected_points=7.0, overall_risk=0.1),
+    ]
+
+    sell_candidates = rank_sell_candidates(squad)
+    pairs = build_transfer_pairs(
+        sell_candidates=sell_candidates,
+        pool_analyses=pool,
+        squad_analyses=squad,
+    )
+
+    assert len(pairs) == 4
+    assert all(pair.reasons for pair in pairs)
+    assert all(pair.sell.reasons for pair in pairs)
+    assert all(pair.buy.reasons for pair in pairs)
+
+
+# --- Transfer economics wired through the pairing pipeline -----------------
+
+
+def _economics_squad_and_pool() -> tuple[
+    list[SquadPlayerAnalysis], list[SquadPlayerAnalysis]
+]:
+    """One weak sell candidate and one clearly stronger buy target,
+    priced so budget never interferes with the economics assertions."""
+    squad = [
+        make_analysis(
+            1, "Weak", 3, 1, expected_points=1.0, overall_risk=0.2, price=5.0,
+        ),
+    ]
+    pool = [
+        make_analysis(
+            10, "Strong", 3, 5, expected_points=8.0, overall_risk=0.2, price=5.0,
+        ),
+    ]
+    return squad, pool
+
+
+def test_pair_economics_are_none_when_free_transfers_are_unknown() -> None:
+    """No public FPL endpoint exposes a free-transfer count, so an
+    unsupplied value is reported as unknown rather than assumed - and
+    priority falls back to the pre-existing classification."""
+    squad, pool = _economics_squad_and_pool()
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+    )
+
+    assert pairs[0].expected_point_gain == 7.0
+    assert pairs[0].hit_cost is None
+    assert pairs[0].net_value is None
+    assert pairs[0].priority in {"essential", "strong", "optional"}
+
+
+def test_pair_with_a_free_transfer_is_essential() -> None:
+    """Case 1 end to end: covered by the free allowance."""
+    squad, pool = _economics_squad_and_pool()
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+        free_transfers_available=1,
+    )
+
+    assert pairs[0].expected_point_gain == 7.0
+    assert pairs[0].hit_cost == 0.0
+    assert pairs[0].net_value == 7.0
+    assert pairs[0].priority == "essential"
+
+
+def test_pair_requiring_a_hit_is_recommended_not_essential() -> None:
+    """Case 2 end to end: the same swap costs 4 points with no free
+    transfer, so it is worth doing but is not "essential"."""
+    squad, pool = _economics_squad_and_pool()
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+        free_transfers_available=0,
+    )
+
+    assert pairs[0].hit_cost == 4.0
+    assert pairs[0].net_value == 3.0
+    assert pairs[0].priority == "recommended"
+
+
+def test_pair_whose_gain_does_not_cover_the_hit_is_optional() -> None:
+    """Case 5 end to end: a positive raw gain that a hit wipes out."""
+    squad = [
+        make_analysis(
+            1, "Weak", 3, 1, expected_points=4.0, overall_risk=0.6, price=5.0,
+        ),
+    ]
+    pool = [
+        make_analysis(
+            10, "Slightly better", 3, 5, expected_points=6.0, overall_risk=0.1, price=5.0,
+        ),
+    ]
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+        free_transfers_available=0,
+    )
+
+    assert pairs[0].expected_point_gain == 2.0
+    assert pairs[0].hit_cost == 4.0
+    assert pairs[0].net_value == -2.0
+    assert pairs[0].priority == "optional"
+
+
+def test_net_value_is_always_gain_minus_hit_cost_for_every_pair() -> None:
+    """The internal-consistency invariant the API promises."""
+    squad = [
+        make_analysis(1, "WeakA", 2, 1, expected_points=1.0, overall_risk=0.6),
+        make_analysis(2, "WeakB", 3, 2, expected_points=1.5, overall_risk=0.5),
+    ]
+    pool = [
+        make_analysis(10, "StrongA", 2, 10, expected_points=8.0, overall_risk=0.1),
+        make_analysis(11, "StrongB", 3, 11, expected_points=9.0, overall_risk=0.1),
+    ]
+
+    for free_transfers in (0, 1, 2):
+        pairs = build_transfer_pairs(
+            sell_candidates=rank_sell_candidates(squad),
+            pool_analyses=pool,
+            squad_analyses=squad,
+            free_transfers_available=free_transfers,
+        )
+
+        assert pairs
+        for pair in pairs:
+            assert pair.hit_cost is not None
+            assert pair.net_value is not None
+            assert pair.net_value == round(pair.expected_point_gain - pair.hit_cost, 2)
+
+
+def test_an_unaffordable_buy_is_skipped_in_favour_of_an_affordable_one() -> None:
+    """Case 6: budget is a real constraint on what gets recommended,
+    not just a flag - the pricier target is passed over for one the
+    manager can actually fund."""
+    squad = [
+        make_analysis(
+            1, "Sell", 2, 1, expected_points=2.0, overall_risk=0.5, price=5.0,
+        ),
+    ]
+    pool = [
+        make_analysis(
+            10, "TooExpensive", 2, 5, expected_points=9.0, overall_risk=0.1, price=9.0,
+        ),
+        make_analysis(
+            11, "Affordable", 2, 6, expected_points=7.0, overall_risk=0.1, price=5.5,
+        ),
+    ]
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+        entry_bank=0.5,
+    )
+
+    assert len(pairs) == 1
+    assert pairs[0].buy.web_name == "Affordable"
+    assert pairs[0].within_budget is True
+
+
+def test_expected_point_gain_diverges_from_net_improvement_when_risk_differs() -> None:
+    """A: buy=8.0, sell=1.0 => expected_point_gain == 7.0, exactly as
+    the raw projections say - never influenced by selection_score.
+
+    B: reproduces the live-observed mismatch (selection_score delta
+    9.13 vs points delta 7.51 for the same pair) by giving the buy
+    candidate much lower risk than the sell candidate, so
+    net_improvement (which factors in overall_risk) diverges sharply
+    from expected_point_gain (which never does)."""
+    squad = [
+        make_analysis(
+            1, "Sell", 3, 1, expected_points=1.0, overall_risk=0.9, price=5.0,
+        ),
+    ]
+    pool = [
+        make_analysis(
+            10, "Buy", 3, 5, expected_points=8.0, overall_risk=0.05, price=5.0,
+        ),
+    ]
+
+    pairs = build_transfer_pairs(
+        sell_candidates=rank_sell_candidates(squad),
+        pool_analyses=pool,
+        squad_analyses=squad,
+    )
+
+    assert len(pairs) == 1
+    pair = pairs[0]
+    assert pair.expected_point_gain == 7.0
+    assert pair.net_improvement != pair.expected_point_gain
+    # The displayed figure must be the points delta, never the
+    # selection-score delta, however large the gap between them.
+    assert pair.expected_point_gain == round(pair.buy.expected_points - pair.sell.expected_points, 2)

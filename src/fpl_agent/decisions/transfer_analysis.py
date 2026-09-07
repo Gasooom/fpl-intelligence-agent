@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fpl_agent.analysis.sell_scoring import SellScore, score_sell_candidate
+from fpl_agent.analysis.transfer_economics import (
+    calculate_transfer_economics,
+    classify_transfer_tier,
+)
 from fpl_agent.analysis.transfer_scoring import score_transfer_candidate
 from fpl_agent.data.models import Fixture, Player, Team
 from fpl_agent.decisions.squad_analysis import (
@@ -77,7 +81,18 @@ class BuyCandidate:
 
 @dataclass(frozen=True)
 class TransferPair:
-    """A deterministic sell -> buy transfer recommendation."""
+    """A deterministic sell -> buy transfer recommendation.
+
+    `net_improvement` (selection-score delta) and the historical
+    threshold-based `priority` remain exactly as before when
+    `free_transfers_available` is unknown - see build_transfer_pairs.
+    `expected_point_gain`/`hit_cost`/`net_value` are the real transfer
+    economics: raw points gain, the FPL hit cost (positive, in points)
+    of making this transfer given the manager's free-transfer
+    allowance, and what's left after that cost. `hit_cost`/`net_value`
+    are None exactly when free_transfers_available was not supplied -
+    an unknown FT count is never assumed to be any particular number.
+    """
 
     sell: SellCandidate
     buy: BuyCandidate
@@ -87,6 +102,9 @@ class TransferPair:
     within_budget: bool | None
     priority: str
     reasons: list[str]
+    expected_point_gain: float
+    hit_cost: float | None
+    net_value: float | None
 
 
 def _build_sell_reasons(
@@ -398,15 +416,33 @@ def build_transfer_pairs(
     pool_analyses: list[SquadPlayerAnalysis],
     squad_analyses: list[SquadPlayerAnalysis],
     entry_bank: float | None = None,
+    free_transfers_available: int | None = None,
     max_pairs: int = 5,
     candidates_per_position: int = 10,
 ) -> list[TransferPair]:
     """Build ranked sell -> buy transfer pairs respecting squad constraints.
 
-    Each sell candidate is matched against the best same-position buy
-    candidate that would not push any FPL team above three players in
-    the resulting squad. Pairs below the worthwhile-improvement
-    threshold are dropped rather than padding the recommendation list.
+    Each sell candidate is matched against the best same-position,
+    affordable buy candidate that would not push any FPL team above
+    three players in the resulting squad. A candidate that is
+    *definitely* unaffordable (entry_bank is known and doesn't cover
+    the price change) is skipped in favor of the next-best one, the
+    same way an already-used or team-limit-breaking candidate already
+    is - an unknown bank is never treated as unaffordable. Pairs below
+    the worthwhile-improvement threshold are dropped rather than
+    padding the recommendation list.
+
+    `priority` reflects real transfer economics - essential /
+    recommended / optional, from net_value and free-transfer coverage
+    (see analysis/transfer_economics.py) - when `free_transfers_available`
+    is supplied by the caller. No public FPL endpoint exposes a
+    manager's free-transfer count (only the authenticated, per-manager
+    my-team endpoint does, which this project does not access), so it
+    can only come from the manager themselves. When it is not
+    supplied, `priority` falls back to the pre-existing
+    selection-score-based classification (essential / strong /
+    optional via classify_transfer_priority), unchanged from before
+    this economics work.
     """
     team_counts = _team_composition(squad_analyses)
     used_buy_ids: set[int] = set()
@@ -435,6 +471,10 @@ def build_transfer_pairs(
             if projected_team_count > _MAX_TEAM_PLAYERS:
                 continue
 
+            candidate_price_change = round(buy.price - sell.price, 1)
+            if entry_bank is not None and candidate_price_change > entry_bank:
+                continue
+
             best_buy = buy
             break
 
@@ -448,18 +488,45 @@ def build_transfer_pairs(
         risk_change = round(sell.overall_risk - best_buy.overall_risk, 2)
         price_change = round(best_buy.price - sell.price, 1)
 
-        priority = classify_transfer_priority(
+        legacy_priority = classify_transfer_priority(
             net_improvement=net_improvement,
             sell_availability_risk=sell.availability_risk,
             buy_availability_risk=best_buy.availability_risk,
         )
 
-        if priority == "avoid":
+        if legacy_priority == "avoid":
             continue
 
         within_budget = (
             None if entry_bank is None else price_change <= entry_bank
         )
+
+        # expected_point_gain never depends on free_transfers_available,
+        # so it's always computed - passing 0 when the count is unknown
+        # is only a placeholder to satisfy calculate_hit_cost's int
+        # parameter; the resulting hit_cost/net_value are discarded
+        # below in that case, never exposed as if 0 free transfers were
+        # a known fact.
+        economics = calculate_transfer_economics(
+            sell_expected_points=sell.expected_points,
+            buy_expected_points=best_buy.expected_points,
+            free_transfers_available=free_transfers_available or 0,
+        )
+
+        hit_cost: float | None
+        net_value: float | None
+
+        if free_transfers_available is None:
+            priority = legacy_priority
+            hit_cost = None
+            net_value = None
+        else:
+            priority = classify_transfer_tier(
+                net_value=economics.net_value,
+                requires_hit=economics.requires_hit,
+            )
+            hit_cost = economics.hit_cost
+            net_value = economics.net_value
 
         used_buy_ids.add(best_buy.player_id)
         team_counts[sell.team_id] = team_counts.get(sell.team_id, 0) - 1
@@ -477,6 +544,9 @@ def build_transfer_pairs(
                 within_budget=within_budget,
                 priority=priority,
                 reasons=_build_pair_reasons(sell, best_buy),
+                expected_point_gain=economics.expected_point_gain,
+                hit_cost=hit_cost,
+                net_value=net_value,
             ),
         )
 

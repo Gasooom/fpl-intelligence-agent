@@ -2,21 +2,35 @@ from __future__ import annotations
 
 from fpl_agent.data.client import FPLClient
 from fpl_agent.data.models import Gameweek
+from fpl_agent.decisions.evaluation import (
+    GameweekEvaluation,
+    build_gameweek_evaluation,
+    build_missing_snapshot_evaluation,
+    build_not_completed_evaluation,
+)
 from fpl_agent.decisions.gameweek_decision import (
     GameweekDecision,
     build_gameweek_decision,
 )
+from fpl_agent.decisions.outcomes import build_actual_outcomes, index_actual_outcomes
+from fpl_agent.decisions.snapshot import build_decision_snapshot
 from fpl_agent.decisions.squad_analysis import (
     SquadDecision,
     build_squad_decision,
 )
+from fpl_agent.persistence.snapshot_store import SnapshotStore
 
 
 class FPLDecisionService:
     """Application service for deterministic FPL squad decisions."""
 
-    def __init__(self, client: FPLClient | None = None) -> None:
+    def __init__(
+        self,
+        client: FPLClient | None = None,
+        snapshot_store: SnapshotStore | None = None,
+    ) -> None:
         self.client = client or FPLClient()
+        self.snapshot_store = snapshot_store or SnapshotStore()
 
     async def analyze_squad(
         self,
@@ -56,11 +70,18 @@ class FPLDecisionService:
         self,
         entry_id: int,
         gameweek: int | None = None,
+        free_transfers_available: int | None = None,
     ) -> GameweekDecision:
         """Fetch FPL data and produce the unified deterministic gameweek decision.
 
         Combines the squad decision (starting XI, bench, captaincy,
         must-play) with deterministic sell/buy transfer intelligence.
+
+        `free_transfers_available` has no public FPL API source (see
+        transfer_analysis.build_transfer_pairs) - when the caller
+        supplies it, transfer priority reflects real hit-cost economics;
+        when omitted, it falls back to the pre-existing
+        selection-score-based classification, unchanged.
         """
         bootstrap = await self.client.get_bootstrap_static()
 
@@ -78,14 +99,64 @@ class FPLDecisionService:
 
         fixtures = await self.client.get_fixtures()
 
-        return build_gameweek_decision(
+        decision = build_gameweek_decision(
             players=bootstrap.elements,
             teams=bootstrap.teams,
             fixtures=fixtures,
             picks=picks_response.picks,
             gameweek=target_gameweek,
             entry_history=picks_response.entry_history,
+            free_transfers_available=free_transfers_available,
         )
+
+        if not self._is_gameweek_finished(bootstrap.events, target_gameweek):
+            # Snapshot only a not-yet-played gameweek: recomputing a
+            # decision for one that has already finished would use
+            # today's bootstrap data (updated form, price, points),
+            # not what was true before that gameweek's deadline, so it
+            # would not be a faithful record of "what was recommended
+            # at the time" - see decisions/snapshot.py.
+            self.snapshot_store.save_snapshot_if_absent(
+                build_decision_snapshot(entry_id, decision),
+            )
+
+        return decision
+
+    async def evaluate_gameweek(
+        self,
+        entry_id: int,
+        gameweek: int | None = None,
+    ) -> GameweekEvaluation:
+        """Compare a recorded decision snapshot against real gameweek outcomes.
+
+        Returns an honest non-evaluated state - never a fabricated
+        result - when the gameweek has not finished yet, or when no
+        decision snapshot was recorded for it.
+        """
+        bootstrap = await self.client.get_bootstrap_static()
+
+        target_gameweek = self._resolve_gameweek(
+            bootstrap.events,
+            gameweek,
+        )
+
+        if not self._is_gameweek_finished(bootstrap.events, target_gameweek):
+            return build_not_completed_evaluation(entry_id, target_gameweek)
+
+        snapshot = self.snapshot_store.get_snapshot(entry_id, target_gameweek)
+
+        if snapshot is None:
+            return build_missing_snapshot_evaluation(entry_id, target_gameweek)
+
+        live = await self.client.get_event_live(target_gameweek)
+        outcomes = index_actual_outcomes(build_actual_outcomes(target_gameweek, live))
+
+        return build_gameweek_evaluation(snapshot, outcomes)
+
+    @staticmethod
+    def _is_gameweek_finished(events: list[Gameweek], gameweek: int) -> bool:
+        """Return whether the given gameweek has finished, per bootstrap data."""
+        return any(event.id == gameweek and event.finished for event in events)
 
     @staticmethod
     def _resolve_gameweek(

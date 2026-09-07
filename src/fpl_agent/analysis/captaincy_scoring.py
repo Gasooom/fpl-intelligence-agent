@@ -21,9 +21,20 @@ def calculate_captaincy_score(
 ) -> CaptaincyScore:
     """Calculate a deterministic captaincy score.
 
-    Expected points are the primary signal.
-    Recent form provides supporting evidence.
-    Easier fixtures improve the score.
+    Policy: maximum expected doubled value. The FPL captain multiplier
+    (2x) is applied to whichever player is chosen - it does not change
+    *who* that should be, since doubling every candidate's expected
+    output equally is a monotonic transform that never changes their
+    relative order. So this score ranks candidates by projected
+    output (expected_points, weighted 0.6) as the dominant signal, with
+    recent form (0.2) and fixture ease (0.2) as supporting evidence for
+    how reliable that projection is over the coming gameweek.
+
+    This is deliberately NOT risk-adjusted or variance-controlled: it
+    has no overall_risk, sample_confidence, or minutes_risk term. A
+    captaincy pick that also needs to weigh those against projection
+    would be a different, explicitly risk-adjusted policy - this one
+    is not that, and should not be read as one.
     """
     projection_score = max(0.0, expected_points) * 0.6
     form_score = max(0.0, form) * 0.2

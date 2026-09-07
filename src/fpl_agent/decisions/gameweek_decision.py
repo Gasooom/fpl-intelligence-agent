@@ -32,8 +32,20 @@ _STRONG_FORM = 6.0
 
 # Used only to rank already-accepted transfer pairs against one another
 # when picking the single best one - not used anywhere else, and does
-# not affect which pairs are accepted or classified as "avoid".
-_PRIORITY_RANK = {"essential": 3, "strong": 2, "optional": 1, "avoid": 0}
+# not affect which pairs are accepted or classified as "avoid". Covers
+# both possible priority vocabularies a TransferPair can carry -
+# "strong" from the legacy selection-score classification (used when
+# free_transfers_available is unknown) and "recommended" from the
+# economics-based tier classification (used when it is supplied) never
+# appear on pairs from the same decision at once, so their relative
+# rank against each other here doesn't matter.
+_PRIORITY_RANK = {
+    "essential": 3,
+    "strong": 2,
+    "recommended": 2,
+    "optional": 1,
+    "avoid": 0,
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +87,26 @@ class GameweekDecision:
     transfer_recommendations: list[TransferPair]
     transfer_count: int
     best_transfer: TransferPair | None
+
+    # The manager's real transfer context. in_the_bank comes from the
+    # FPL entry's own picks response (see extract_bank_balance) and is
+    # None only when that data is absent. free_transfers_available has
+    # no public FPL API source at all (see transfer_analysis.
+    # build_transfer_pairs) - it is None unless the caller supplies it
+    # explicitly, and is never guessed at.
+    free_transfers_available: int | None
+    in_the_bank: float | None
+
+    # Mirrors official FPL gameweek scoring: the starting XI's raw
+    # projected total, plus one extra copy of the captain's expected
+    # points for the captain multiplier - bench players are excluded
+    # (they don't count toward the gameweek score unless an automatic
+    # substitution happens, which this deterministic pre-game
+    # projection does not simulate), and the captain is counted twice
+    # (once inside starting_xi_expected_points, once as the bonus),
+    # never more.
+    starting_xi_expected_points: float
+    projected_gameweek_points: float
 
     confidence: str
     decision_summary: str
@@ -263,10 +295,21 @@ def _build_summary(
         parts.append("No worthwhile transfers found this gameweek.")
 
     if best_transfer is not None:
+        # expected_point_gain (buy.expected_points - sell.expected_points)
+        # is the same field the API and frontend card use - never
+        # net_improvement (a selection-score delta that also factors in
+        # form/confidence/risk) for a line that says "expected points".
+        # Two different formulas here previously produced two different
+        # numbers for the same transfer. Unlike net_improvement (always
+        # positive by construction - a pair is only ever accepted when
+        # the buy's selection_score beats the sell's), expected_point_gain
+        # can be negative, so the sign is never hardcoded.
+        gain = best_transfer.expected_point_gain
+        signed_gain = f"+{gain}" if gain >= 0 else str(gain)
         parts.append(
             f"Best single transfer: {best_transfer.sell.web_name} -> "
             f"{best_transfer.buy.web_name} "
-            f"(+{best_transfer.net_improvement} expected points, "
+            f"({signed_gain} expected points, "
             f"{best_transfer.priority}).",
         )
 
@@ -282,6 +325,7 @@ def build_gameweek_decision(
     picks: list[SquadPick] | list[int],
     gameweek: int,
     entry_history: dict[str, object] | None = None,
+    free_transfers_available: int | None = None,
     buy_candidates_limit: int = 10,
     max_transfer_pairs: int = 5,
 ) -> GameweekDecision:
@@ -321,6 +365,7 @@ def build_gameweek_decision(
         pool_analyses=pool_analyses,
         squad_analyses=full_squad,
         entry_bank=entry_bank,
+        free_transfers_available=free_transfers_available,
         max_pairs=max_transfer_pairs,
     )
 
@@ -343,6 +388,19 @@ def build_gameweek_decision(
         confidence,
     )
 
+    # Mirrors official FPL scoring (see PROJECT_ROOT/README.md and the
+    # GameweekDecision docstring): the starting XI's raw total, plus one
+    # extra copy of the captain's expected points for the captain
+    # multiplier. Bench players are never included.
+    starting_xi_expected_points = round(
+        sum(player.expected_points for player in squad_decision.starting_xi),
+        2,
+    )
+    projected_gameweek_points = round(
+        starting_xi_expected_points + squad_decision.captain.expected_points,
+        2,
+    )
+
     return GameweekDecision(
         gameweek=gameweek,
         generated_at=datetime.now(UTC).isoformat(),
@@ -358,6 +416,10 @@ def build_gameweek_decision(
         transfer_recommendations=transfer_pairs,
         transfer_count=len(transfer_pairs),
         best_transfer=best_transfer,
+        free_transfers_available=free_transfers_available,
+        in_the_bank=entry_bank,
+        starting_xi_expected_points=starting_xi_expected_points,
+        projected_gameweek_points=projected_gameweek_points,
         confidence=confidence,
         decision_summary=decision_summary,
         evidence=evidence,

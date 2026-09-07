@@ -102,7 +102,7 @@ def test_player_to_response_returns_expected_schema() -> None:
         captaincy_score=9.2,
     )
 
-    response = _player_to_response(player)
+    response = _player_to_response(player, captain_player_id=999)
 
     assert isinstance(response, PlayerDecisionResponse)
 
@@ -136,7 +136,7 @@ def test_player_to_response_does_not_expose_internal_fields() -> None:
         team_id=1,
     )
 
-    response = _player_to_response(player)
+    response = _player_to_response(player, captain_player_id=999)
 
     payload = response.model_dump()
 
@@ -144,6 +144,30 @@ def test_player_to_response_does_not_expose_internal_fields() -> None:
     assert "fixture_risk" not in payload
     assert "sample_confidence" not in payload
     assert "selection_score" not in payload
+
+
+def test_player_to_response_doubles_effective_points_for_the_captain() -> None:
+    """effective_points = expected_points * 2 for the selected captain only."""
+    player = make_player(player_id=11, position_type=4, team_id=1, expected_points=7.17)
+
+    response = _player_to_response(player, captain_player_id=11)
+
+    assert response.effective_points == 14.34
+    assert response.expected_points == 7.17
+
+
+def test_player_to_response_does_not_double_effective_points_for_a_non_captain() -> None:
+    """A player who is not the selected captain - including one who
+    could plausibly be the vice-captain - gets their raw expected
+    points unmultiplied. This deterministic system never models the
+    vice-captain automatically becoming captain, so there is no rule
+    under which the vice's effective_points would differ from their
+    expected_points."""
+    player = make_player(player_id=10, position_type=3, team_id=1, expected_points=6.19)
+
+    response = _player_to_response(player, captain_player_id=11)
+
+    assert response.effective_points == response.expected_points == 6.19
 
 
 def test_squad_decision_to_response_returns_complete_response() -> None:
@@ -174,6 +198,19 @@ def test_squad_decision_to_response_returns_complete_response() -> None:
         player.player_id
         for player in decision.must_play
     ]
+
+    # Only the actual captain gets the 2x multiplier - the vice, and
+    # every other player in the response, gets their raw expected
+    # points unmultiplied.
+    assert response.captain.effective_points == response.captain.expected_points * 2
+    assert response.vice_captain.effective_points == response.vice_captain.expected_points
+    non_captain_starters = [
+        player for player in response.starting_xi if player.player_id != response.captain.player_id
+    ]
+    assert non_captain_starters
+    assert all(
+        player.effective_points == player.expected_points for player in non_captain_starters
+    )
 
 
 def test_squad_decision_to_response_preserves_starting_xi_order() -> None:

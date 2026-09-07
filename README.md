@@ -1,332 +1,228 @@
 # Fantasy Decision Intelligence
 
-A deterministic Fantasy Premier League (FPL) decision engine, served over a
-FastAPI HTTP boundary, that turns a manager's real squad into a fully
-evidence-backed gameweek action plan: starting XI, captaincy, and ranked
-sell/buy transfer recommendations.
+A deterministic decision-intelligence system that turns real Fantasy Premier League data into an explainable, evaluated gameweek action plan — built and served as a production-shaped FastAPI backend.
+
+
+**The deterministic engine is the sole decision authority.** No LLM ever
+decides starting XI, bench, captain, vice-captain, sell candidates, buy
+candidates, transfers, risk, or confidence. Every recommendation is the
+output of transparent, testable, reproducible rules over real data — never
+a model's guess.
+
+The system also does not stop at prediction. It records what it recommended
+*before* a gameweek is played, then compares that record against real FPL
+results afterward — so it can answer a question most "AI sports tools"
+never even attempt:
+
+> **Did the decision actually work?**
 
 ## What it does
 
-Give it an FPL entry ID and a gameweek, and it answers:
+Given an FPL entry ID, it answers:
 
-1. Who should I start?
-2. Who should I bench?
-3. Who should I captain?
-4. Who should I sell?
-5. Who should I buy?
-6. What should I do this gameweek, overall?
+- Who should start, and who sits on the bench?
+- Who should be captain and vice-captain?
+- Who should be sold, and who should replace them?
+- What's the single strongest transfer to make this gameweek?
+- What actually happened last time, versus what was predicted?
 
-Every answer is a deterministic function of real FPL data - projected
-points, fixture difficulty, form, risk, and confidence - never a guess,
-and every recommendation carries structured evidence explaining why.
+Every answer ships with structured evidence — the metrics that produced it,
+not a canned explanation.
 
-## Why it exists
+## How it works
 
-Most "FPL AI" tools either hardcode opinions or hand the whole decision to
-an LLM and hope the numbers come out sensible. This project takes the
-opposite position: **the deterministic engine is the sole decision
-authority.** Starting XI, captaincy, bench order, sell candidates, buy
-candidates, and transfer priority are all computed by transparent,
-testable, reproducible rules over real data. There is no LLM anywhere in
-that path - a language model could only ever be added later to narrate an
-already-computed decision in prose, never to change it.
+```
+Official FPL API
+      ↓
+Data / Metrics            (form, points-per-90, xGI/90, fixture difficulty)
+      ↓
+Projection + Risk + Confidence
+      ↓
+Squad + Transfer Intelligence
+      ↓
+Gameweek Decision           (starting XI, captain, ranked transfers, evidence)
+      ↓
+FastAPI
+      ↓
+UI / API
+```
 
-That distinction is the point of the project: it is a decision-*engine*,
-not a chatbot with FPL opinions.
+Three concepts stay deliberately separate rather than being collapsed into
+one score:
+
+| Concept | Question it answers |
+|---|---|
+| **Projection** | What output do we expect? |
+| **Risk** | How reliable/available is that output? |
+| **Confidence** | How strong is the evidence behind it? |
+| **Decision** | What should the manager actually do? |
+
+Then, once a gameweek is played:
+
+```
+Decision Snapshot  (written pre-gameweek, write-once)
+      ↓
+Real FPL Results   (official post-gameweek data)
+      ↓
+Evaluation         (expected vs. actual, prediction error)
+```
+
+Expected values always come from the original snapshot — not recomputed
+from today's data. Actual values always come from real FPL results. There
+are no simulated outcomes and no fabricated accuracy metrics.
+
+## Deterministic Decision Engine
+
+- **Starting XI / bench**: a bounded formation search (valid GK/DEF/MID/FWD
+  combinations, 3-per-team limit) over the manager's own 15 picks — not the
+  full ~650-player pool.
+- **Captain / vice-captain**: ranked by a captaincy score combining
+  projection, form, and fixture ease; the top pick's points count twice
+  toward the projected gameweek total, exactly as FPL scores it.
+- **Transfer intelligence**: every current squad player is scored for sale
+  risk; the wider player pool is ranked with a single efficient pass (no
+  combinatorial search) and paired against sell candidates within FPL's
+  team-limit constraints. The engine surfaces one best single transfer plus
+  ranked alternatives — each an independent one-transfer option, not a
+  bundled plan.
+- **Explainable by construction**: every score is a sum of named, inspectable
+  components, so every recommendation's reasons are generated from the same
+  numbers that produced the decision.
+
+## Explainability
+
+Every recommendation carries structured evidence based on the metrics that
+produced it — never a hardcoded, per-player explanation:
+
+```
+Coppola → Bogle
+
+- Higher expected points
+- Better recent form
+- Lower risk
+- Stronger minutes confidence
+- Better points-per-price value
+```
+
+## Evaluation
+
+```
+Prediction → Decision Snapshot → Real FPL Results → Expected vs. Actual → Prediction Error
+```
+
+Before a gameweek is played, the engine's recommendation is written once to
+a local store and never overwritten — a faithful record of what was
+actually recommended, immune to later data drift (form, prices, and
+projections all keep moving after the fact). Once the gameweek finishes,
+that snapshot is compared against official FPL results to produce:
+
+- Whether the captain call was correct
+- Starting XI vs. bench actual points, and the prediction error against the
+  snapshot's expected total
+- Expected vs. actual improvement for the recommended transfer
+- Per-player prediction error across the full recorded squad
+
+If a gameweek hasn't finished, or was never snapshotted, the API says so
+explicitly rather than guessing.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A["Real FPL API\n(fantasy.premierleague.com)"] --> B["Data client & models\nfpl_agent/data/"]
-    B --> C["Player metrics\nform, PPG, PP90, xGI/90"]
-    C --> D["Projection\nexpected points"]
-    D --> E["Risk\nminutes / form / fixture / availability"]
-    E --> F["Confidence\nsample-size evidence strength"]
-    F --> G["Captaincy scoring"]
-    G --> H["Squad decision\nstarting XI, bench, captain, must-play"]
-    F --> I["Transfer intelligence\nsell / buy / pairing / priority"]
-    H --> J["GameweekDecision\n(evidence + confidence + summary)"]
-    I --> J
-    J --> K["FastAPI\nGET /api/v1/decision/{entry_id}"]
-    K --> L["Demo page (GET /)\n+ OpenAPI docs, curl, any client"]
+```
+Official FPL API
+      ↓
+Data / Metrics
+      ↓
+Projection + Risk + Confidence
+      ↓
+Squad + Transfer Intelligence
+      ↓
+Gameweek Decision
+      ↓
+FastAPI
+      ↓
+UI / API
 ```
 
-Four concepts stay deliberately separate through this pipeline, rather
-than being collapsed into one score:
+## Example
 
-| Concept | Question it answers | Where |
-|---|---|---|
-| **Projection** | What output do we expect? | `analysis/projections.py` |
-| **Risk** | How reliable/available is that output? | `analysis/risk_signals.py` |
-| **Confidence** | How much evidence backs this player's numbers? | `analysis/confidence.py` |
-| **Decision** | What should the manager actually do? | `decisions/` |
-
-## Deterministic decision engine
-
-- **Starting XI / bench**: `decisions/squad_analysis.py` runs a bounded
-  formation search (valid GK/DEF/MID/FWD combinations, 3-per-team limit)
-  **only over the manager's own 15 supplied picks** - never over the full
-  ~650-player pool. This was a deliberate performance fix: an earlier
-  version accidentally combinatorially searched the whole player pool and
-  became unusably slow. It now completes in milliseconds.
-- **Captaincy**: ranked by `captaincy_score` (projection + form + fixture
-  ease), captain and vice-captain are the top two, tie-broken by expected
-  points then overall selection quality.
-- **Must-play**: players with zero availability risk, low overall risk,
-  and adequate sample confidence - the players the engine is confident
-  enough to flag as auto-starts.
-- **Selection score** (used for starting XI/bench ranking and as the
-  buy-candidate ranking metric):
-
-  ```text
-  confidence_bonus = (sample_confidence - 0.5) * 0.5
-  selection_score  = expected_points + form * 0.15 + confidence_bonus
-                      - overall_risk * 2.0
-  ```
-
-## Transfer intelligence
-
-- **Sell scoring** (`analysis/sell_scoring.py`): every current squad
-  player gets a transparent, additive `SellScore` - five independent
-  penalties (risk, poor projection, difficult fixture, availability,
-  low confidence) that add up to the total, so the score is always
-  explainable in terms of the metrics that produced it.
-- **Buy candidates** (`decisions/transfer_analysis.py`): the wider player
-  pool is filtered cheaply (available, squad-excluded, at least one full
-  match's worth of minutes played) before scoring - an `O(n)` pass with
-  no combinatorial search - then ranked by the same `selection_score`
-  used for squad selection, so buy quality is judged on the identical
-  yardstick as your own players.
-- **Sell → buy pairing**: each sell candidate is matched to the best
-  same-position buy target that would not push any FPL team above three
-  players in the resulting squad, with buy targets deduplicated across
-  pairs and tiny-improvement pairs dropped rather than padding the list.
-- **Transfer priority**: `essential` / `strong` / `optional` / `avoid`,
-  classified deterministically from projected gain and whether the move
-  replaces a doubtful/unavailable player with a fully available one.
-  `avoid`-classified pairs are filtered out of the response entirely -
-  the goal is decision usefulness, not a long list.
-- **Best single transfer**: `best_transfer` answers "if I make ONE
-  transfer, what's the strongest move?" - the accepted pair with the
-  highest priority tier, tie-broken by projected point gain. It is
-  always one of `transfer_recommendations`, just picked out explicitly
-  rather than left implicit in list order.
-
-## Risk vs. confidence vs. availability
-
-These are computed independently and never collapsed into one number:
-
-- **Risk** (`overall_risk`, `risk_level`): a weighted blend of minutes
-  risk, form uncertainty, fixture risk, and availability risk.
-- **Confidence** (`sample_confidence`): how much playing-time evidence
-  backs a player's numbers - independent of whether they're currently
-  injured or doubtful.
-- **Availability** (`availability_risk`): derived from FPL's own status
-  and chance-of-playing fields (injured/suspended/doubtful), folded into
-  `overall_risk` as one clearly-labeled component rather than merged
-  into it silently.
-
-## API
+Real output from the live API, gameweek 3:
 
 ```
-GET /api/v1/decision/{entry_id}?gameweek={gameweek}
-GET /health
+Best transfer:  Coppola → Bogle
+                +8.08 expected points
+
+Captain:        João Pedro
+                7.17 expected points · 14.34 effective points (2x)
+
+Starting XI:    47.70 expected points
+Projected gameweek total: 54.87 expected points
 ```
 
-`gameweek` is optional and defaults to the current (or next) FPL
-gameweek. The route is a thin HTTP boundary - it only calls
-`FPLDecisionService.analyze_gameweek(...)` and converts the result to the
-response schema; it contains no decision logic of its own. Invalid
-entry IDs, invalid gameweeks, and service-level failures (e.g. an
-unresolvable gameweek) map to clean `422`/`400` responses; nothing
-raises an unhandled 500 for ordinary bad input.
+## Tech Stack
 
-Interactive OpenAPI docs are available at `/docs` once the server is
-running.
-
-### Example response (trimmed)
-
-```json
-{
-  "gameweek": 3,
-  "decision_engine_version": "v1",
-  "data_source": "official-fpl-api",
-  "confidence": "Low",
-  "captain": { "player_id": 599, "web_name": "Cherki", "expected_points": 10.31 },
-  "vice_captain": { "web_name": "Haaland" },
-  "starting_xi": ["... 11 players ..."],
-  "bench": ["... up to 4 players ..."],
-  "must_play": [],
-  "sell_candidates": [
-    {
-      "web_name": "Coppola",
-      "score": 6.4,
-      "rank": 1,
-      "reasons": ["Weak projected output (0.0 expected points)", "High overall risk (medium, 0.6)"]
-    }
-  ],
-  "buy_candidates": [
-    { "web_name": "Gakpo", "selection_score": 10.2, "price": 7.1 }
-  ],
-  "transfer_recommendations": [
-    {
-      "sell": { "web_name": "Coppola" },
-      "buy": { "web_name": "Gvardiol" },
-      "net_improvement": 9.13,
-      "priority": "essential",
-      "within_budget": false,
-      "reasons": ["Higher expected points (... vs ...)", "Lower risk"]
-    }
-  ],
-  "transfer_count": 5,
-  "best_transfer": {
-    "sell": { "web_name": "Coppola" },
-    "buy": { "web_name": "Gvardiol" },
-    "net_improvement": 9.13,
-    "priority": "essential"
-  },
-  "decision_summary": "Captain: Cherki (10.31 expected points). Vice-captain: Haaland. 5 transfer recommendation(s): ... Best single transfer: Coppola -> Gvardiol (+9.13 expected points, essential). Decision confidence: Low."
-}
-```
-
-This is real output from the live API for a public FPL entry (see
-Testing below) - it is not fabricated. Field names above are trimmed for
-readability; the actual schema exposes richer per-player detail (form,
-fixture difficulty, points-per-90, xGI/90, risk breakdown, etc.) without
-leaking internal-only fields like the raw selection-score components.
-
-## Demo page
-
-`GET /` serves a single self-contained HTML/CSS/vanilla-JS page
-(`app/static/index.html`) - no templating engine, no frontend framework,
-no build step. Enter an FPL entry ID (and optionally a gameweek) and it
-renders:
-
-- Captain and vice-captain, with expected points and captaincy score
-- Starting XI grouped by position, and the bench
-- Must-play players (or an honest note when none currently qualify)
-- A highlighted **best single transfer** box (sell → buy, expected gain,
-  risk change, priority, reasons), any further recommended transfers
-  below it, and the top ranked sell/buy candidates
-
-The page does zero scoring itself - it only calls
-`GET /api/v1/decision/{entry_id}` client-side and renders whatever comes
-back, so it can never drift from what the API actually returns.
+Python · FastAPI · Pydantic · SQLite · pytest · Ruff · mypy · Official FPL API
 
 ## Testing
+
+**331 automated tests**, almost entirely deterministic and offline, covering:
+
+- Decision logic — starting XI, bench, captaincy, must-play rules
+- Projection, risk, and confidence scoring
+- Transfer intelligence — sell/buy ranking, pairing, priority tiers, budget
+- API contracts — request validation, error mapping, response schemas
+- Decision snapshots and their write-once guarantee
+- Evaluation — captain outcome, expected-vs-actual, per-player prediction
+  error
+- Edge cases — tiny sample sizes, missing results, tied outcomes
 
 ```
 .venv/Scripts/python.exe -m pytest -q
 ```
-
-230+ tests, all deterministic and offline - no test in the default suite
-calls the live FPL API. Coverage includes:
-
-- Scoring unit tests: sell scoring, buy/transfer scoring, captaincy
-  scoring, risk signals, confidence, projections, form trends.
-- Decision-engine tests: starting XI formation/team-limit constraints,
-  bench selection, must-play, captain/vice-captain selection.
-- Transfer-intelligence tests: sell ranking, buy ranking and limits,
-  priority-threshold classification, team-limit enforcement during
-  pairing, buy-candidate dedup across pairs, tiny-improvement filtering,
-  budget-awareness, and the tiny-minute-sample exclusion (see
-  Limitations).
-- API tests: valid requests, entry_id/gameweek propagation, `ValueError`
-  → `400` mapping, request validation → `422`, response-schema shape
-  (internal fields never leak), and dependency-injection wiring - all
-  against a `FakeDecisionService` via FastAPI `TestClient`, never the
-  live API.
-- A manual, skipped-by-default live smoke test
-  (`tests/test_live_fpl_smoke.py`) exercises the full pipeline against a
-  real FPL entry:
-
-  ```
-  RUN_LIVE_FPL_SMOKE=1 .venv/Scripts/python.exe -m pytest tests/test_live_fpl_smoke.py -v
-  ```
 
 ## Running locally
 
 ```bash
-# 1. Create and activate a virtual environment (Python 3.12+)
 python -m venv .venv
-.venv/Scripts/activate          # Windows
-# source .venv/bin/activate     # macOS/Linux
+.venv/Scripts/activate                 # Windows (source .venv/bin/activate on macOS/Linux)
 
-# 2. Install the project with dev dependencies
 pip install -e ".[dev]"
-
-# 3. Run the tests
 .venv/Scripts/python.exe -m pytest -q
-
-# 4. Start the API
 .venv/Scripts/python.exe -m uvicorn app.main:app --reload
 
-# 5a. Open the demo page in a browser
-#     http://127.0.0.1:8000/
-
-# 5b. ...or call the API directly
+# Demo page:  http://127.0.0.1:8000/
 curl "http://127.0.0.1:8000/api/v1/decision/8731757"
 ```
 
-No API key is required for the deterministic decision engine or the
-FastAPI boundary - the FPL API used is public. `8731757` above is only a
-real public FPL entry used for demos; it is never hardcoded into
-production decision logic.
+No API key required — the FPL data source is public.
 
 ## Design principles
 
-1. **The deterministic engine is the sole decision authority.** No LLM
-   ever decides starting XI, captaincy, bench, sell/buy candidates, risk,
-   or confidence.
-2. **Never optimize over the full player pool.** Starting XI search is
-   bounded to the manager's own 15 picks; buy-candidate ranking over the
-   wider pool is a single `O(n)` scoring pass, never a combinatorial
-   search.
-3. **Every recommendation carries evidence.** Reasons are generated
-   dynamically from the metrics that produced a score - never hardcoded
-   per player.
-4. **Risk, confidence, and availability are separate concepts.** They are
-   computed independently and exposed as distinct fields, not merged into
-   one opaque number.
-5. **Prefer one strong endpoint over endpoint sprawl.** The whole
-   gameweek decision - squad and transfers - is served from a single
-   `GET /api/v1/decision/{entry_id}` call.
+1. **The deterministic engine is the sole decision authority.** No LLM ever
+   decides starting XI, captaincy, bench, transfers, risk, or confidence.
+2. **Never optimize over the full player pool.** Squad decisions are bounded
+   to the manager's own 15 picks; the wider pool is ranked with a single
+   efficient pass, never a combinatorial search.
+3. **Every recommendation carries evidence**, generated from the metrics
+   that produced it.
+4. **A decision is only evaluated against what genuinely happened.** No
+   simulated results, no fabricated accuracy metrics — if the data to
+   evaluate honestly doesn't exist yet, the API says so.
 
-## Known limitations
+## Limitations
 
-- **Early-season / low-minute samples**: per-90 stats extrapolate raw
-  minutes with no floor (`total_points / minutes * 90`), so a player with
-  only a handful of minutes can produce an inflated projection. The
-  buy-candidate pool guards against this by requiring at least one full
-  match's worth of minutes before a player is considered a buy candidate
-  (see `transfer_analysis._MIN_POOL_MINUTES`), but the same caveat can
-  still apply to a manager's own squad members with minimal minutes very
-  early in a season - this is a transparent trade-off, not a hidden one.
-- **Budget awareness is informational, not enforced**: the manager's
-  bank balance is read from FPL's `entry_history.bank` field when
-  present and used to flag `within_budget` on each transfer pair, but it
-  does not block a recommendation. FPL's public API does not reliably
-  expose enough state (pending transfers already made this gameweek,
-  free-transfer count, etc.) to enforce a hard budget constraint with
-  confidence, so this is surfaced as evidence for the manager to weigh
-  rather than a filter.
-- **Minutes-risk thresholds are intentionally coarse** and unchanged from
-  the original, already-validated model - they were reviewed but not
-  altered without a demonstrated bug, per this project's own
-  "don't rewrite working code without a reason" principle.
+- Early-season, low-minute samples can inflate per-90 projections; the buy
+  pool guards against this with a minimum-minutes floor, but a manager's
+  own early-season squad members can still carry the same caveat.
+- Budget awareness is informational (surfaced per transfer), not enforced —
+  FPL's public API doesn't reliably expose enough live state to enforce it
+  with confidence.
+- Evaluation starts from zero history: only gameweeks snapshotted after this
+  feature shipped can be evaluated. No aggregate metrics (e.g. captain
+  success rate) are exposed yet — a single gameweek isn't a meaningful
+  sample.
 
-## Future: LLM explanation layer
+## Future direction
 
-Deliberately **not** implemented yet, to ship the deterministic core
-today rather than risk scope creep. If added later, the architecture is
-fixed in advance:
-
-```
-Deterministic Engine → Structured Decision → LLM Explanation → Human-readable text
-```
-
-Never the reverse. An explanation layer would receive the already-computed
-`GameweekDecision` (and nothing else) and could only phrase it in prose -
-it would have no ability to invent metrics, change a ranking, or override
-a captain/transfer/starting-XI decision made upstream.
+An optional LLM layer could narrate an already-computed decision in prose —
+it would receive the final structured decision and explain it, never decide
+it, invent a metric, or override a result.
