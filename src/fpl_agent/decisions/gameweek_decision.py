@@ -27,9 +27,7 @@ DECISION_ENGINE_VERSION = "v1"
 DATA_SOURCE = "official-fpl-api"
 
 _HIGH_CONFIDENCE_SAMPLE = 0.75
-_HIGH_CONFIDENCE_RISK = 0.3
 _MEDIUM_CONFIDENCE_SAMPLE = 0.5
-_MEDIUM_CONFIDENCE_RISK = 0.5
 _STRONG_FORM = 6.0
 
 # Used only to rank already-accepted transfer pairs against one another
@@ -84,11 +82,21 @@ class GameweekDecision:
 
 
 def _aggregate_confidence(starting_xi: list[SquadPlayerAnalysis]) -> str:
-    """Aggregate starting-XI confidence and risk into one deterministic label.
+    """Aggregate starting-XI sample confidence into one deterministic label.
 
-    High: strong average sample confidence and low average risk.
-    Medium: adequate confidence and moderate risk.
-    Low: everything else - deliberately the conservative default.
+    This reflects only the strength of the playing-time evidence behind
+    the starting XI's projections (average `sample_confidence`) - never
+    risk, availability, or how attractive the resulting decision is.
+    Those are separate, independently-exposed dimensions (`overall_risk`
+    / `risk_level` per player) and must stay that way: folding risk in
+    here would make "confidence" a disguised measure of how good the
+    recommendation looks, rather than how much evidence backs it.
+
+    High: strong average sample confidence.
+    Medium: adequate average sample confidence.
+    Low: everything else - deliberately the conservative default,
+    including early-season gameweeks where little playing-time evidence
+    exists yet for anyone.
     """
     if not starting_xi:
         return "Low"
@@ -96,17 +104,11 @@ def _aggregate_confidence(starting_xi: list[SquadPlayerAnalysis]) -> str:
     avg_confidence = sum(
         player.sample_confidence for player in starting_xi
     ) / len(starting_xi)
-    avg_risk = sum(player.overall_risk for player in starting_xi) / len(
-        starting_xi,
-    )
 
-    if avg_confidence >= _HIGH_CONFIDENCE_SAMPLE and avg_risk < _HIGH_CONFIDENCE_RISK:
+    if avg_confidence >= _HIGH_CONFIDENCE_SAMPLE:
         return "High"
 
-    if (
-        avg_confidence >= _MEDIUM_CONFIDENCE_SAMPLE
-        and avg_risk < _MEDIUM_CONFIDENCE_RISK
-    ):
+    if avg_confidence >= _MEDIUM_CONFIDENCE_SAMPLE:
         return "Medium"
 
     return "Low"

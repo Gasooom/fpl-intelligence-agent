@@ -7,14 +7,47 @@ from fpl_agent.decisions.gameweek_decision import (
     DECISION_ENGINE_VERSION,
     GameweekDecision,
     RecommendationEvidence,
+    _aggregate_confidence,
     build_gameweek_decision,
     select_best_transfer,
 )
+from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
 from fpl_agent.decisions.transfer_analysis import (
     BuyCandidate,
     SellCandidate,
     TransferPair,
 )
+
+
+def _squad_player_analysis(
+    player_id: int,
+    sample_confidence: float,
+    overall_risk: float = 0.2,
+) -> SquadPlayerAnalysis:
+    """A minimal SquadPlayerAnalysis for exercising _aggregate_confidence
+    directly, without building a full gameweek decision."""
+    return SquadPlayerAnalysis(
+        player_id=player_id,
+        web_name=f"Player {player_id}",
+        position_type=3,
+        team_id=1,
+        price=5.0,
+        form=5.0,
+        points_per_game=5.0,
+        points_per_90=5.0,
+        xgi_per_90=0.5,
+        fixture_difficulty=2.0,
+        expected_points=5.0,
+        minutes_risk=0.0,
+        form_uncertainty=0.0,
+        fixture_risk=0.0,
+        availability_risk=0.0,
+        overall_risk=overall_risk,
+        risk_level="low",
+        sample_confidence=sample_confidence,
+        captaincy_score=5.0,
+        selection_score=5.0,
+    )
 
 
 def _player(
@@ -355,3 +388,70 @@ def test_select_best_transfer_breaks_ties_within_tier_by_net_improvement() -> (
 
 def test_select_best_transfer_returns_none_for_empty_list() -> None:
     assert select_best_transfer([]) is None
+
+
+# --- Decision confidence: strength of evidence only, never risk ---
+
+
+def test_aggregate_confidence_is_low_when_sample_evidence_is_genuinely_thin() -> None:
+    """Early-season case: every starter has the minimum minutes-based
+    sample_confidence bucket (0.25, e.g. gameweek 3). Confidence must be
+    Low, and this must hold true even when risk is uniformly LOW - proving
+    the Low label reflects thin evidence, not risk."""
+    starting_xi = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.25, overall_risk=0.05)
+        for i in range(11)
+    ]
+
+    assert _aggregate_confidence(starting_xi) == "Low"
+
+
+def test_aggregate_confidence_is_medium_with_adequate_sample_evidence() -> None:
+    starting_xi = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.5)
+        for i in range(11)
+    ]
+
+    assert _aggregate_confidence(starting_xi) == "Medium"
+
+
+def test_aggregate_confidence_is_high_with_strong_sample_evidence() -> None:
+    starting_xi = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.75)
+        for i in range(11)
+    ]
+
+    assert _aggregate_confidence(starting_xi) == "High"
+
+
+def test_aggregate_confidence_is_not_downgraded_by_high_risk() -> None:
+    """Regression test: confidence measures evidence strength only, per
+    the Projection / Risk / Confidence / Decision separation - risk must
+    never disguise itself as low confidence. A starting XI with strong
+    sample evidence but high risk (e.g. rotation/fixture doubt) must still
+    report High confidence; risk stays visible separately via each
+    player's own overall_risk/risk_level."""
+    starting_xi = [
+        _squad_player_analysis(player_id=i, sample_confidence=1.0, overall_risk=0.95)
+        for i in range(11)
+    ]
+
+    assert _aggregate_confidence(starting_xi) == "High"
+
+
+def test_aggregate_confidence_boundary_values() -> None:
+    just_below_medium = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.49)
+        for i in range(11)
+    ]
+    just_below_high = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.74)
+        for i in range(11)
+    ]
+
+    assert _aggregate_confidence(just_below_medium) == "Low"
+    assert _aggregate_confidence(just_below_high) == "Medium"
+
+
+def test_aggregate_confidence_is_low_for_an_empty_starting_xi() -> None:
+    assert _aggregate_confidence([]) == "Low"
