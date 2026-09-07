@@ -1,7 +1,7 @@
 import pytest
 
 from fpl_agent.data.client import FPLClient
-from fpl_agent.data.models import BootstrapData
+from fpl_agent.data.models import BootstrapData, EventLiveResponse
 
 
 @pytest.mark.asyncio
@@ -14,6 +14,18 @@ async def test_get_bootstrap_static() -> None:
     assert len(data.elements) > 0
     assert len(data.teams) == 20
     assert len(data.events) > 0
+
+
+@pytest.mark.asyncio
+async def test_get_event_live_returns_actual_points_for_a_finished_gameweek() -> None:
+    """Gameweek 1 of any Premier League season is always long finished."""
+    client = FPLClient()
+
+    data = await client.get_event_live(1)
+
+    assert isinstance(data, EventLiveResponse)
+    assert len(data.elements) > 0
+    assert all(isinstance(element.stats.total_points, int) for element in data.elements)
 
 
 def test_player_model() -> None:
@@ -59,3 +71,30 @@ def test_player_model() -> None:
 
     assert result.id == 1
     assert result.web_name == "Player"
+
+
+def test_event_live_response_model_ignores_unmodeled_stats() -> None:
+    """Only total_points is modeled; the rest of the real stats block
+    (minutes, bps, ICT, xG, in_dreamteam, ...) should be ignored, not
+    rejected."""
+    payload = {
+        "elements": [
+            {
+                "id": 599,
+                "stats": {
+                    "minutes": 90,
+                    "goals_scored": 1,
+                    "total_points": 8,
+                    "bps": 34,
+                    "in_dreamteam": True,
+                },
+                "explain": [{"fixture": 1, "stats": []}],
+            },
+        ],
+    }
+
+    result = EventLiveResponse.model_validate(payload)
+
+    assert len(result.elements) == 1
+    assert result.elements[0].id == 599
+    assert result.elements[0].stats.total_points == 8

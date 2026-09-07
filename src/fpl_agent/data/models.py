@@ -128,6 +128,41 @@ class BootstrapData(BaseModel):
     events: list[Gameweek]
 
 
+class EventLiveElementStats(BaseModel):
+    """One player's actual, already-played stats for a gameweek.
+
+    Only the field evaluation actually needs. The live endpoint returns
+    a much larger stats block (minutes, goals, bps, ICT, etc.); those
+    are deliberately left out rather than modeled speculatively ahead
+    of a defined use.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    total_points: int
+
+
+class EventLiveElement(BaseModel):
+    """One player's entry in the event-live response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    stats: EventLiveElementStats
+
+
+class EventLiveResponse(BaseModel):
+    """Actual per-player points for one gameweek, once it has been played.
+
+    Mirrors the official FPL `event/{event}/live/` endpoint - the only
+    source of real, already-happened outcome data this project uses.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    elements: list[EventLiveElement]
+
+
 class FPLEntry(BaseModel):
     """FPL manager entry."""
 

@@ -6,6 +6,7 @@ import httpx
 
 from fpl_agent.data.models import (
     BootstrapData,
+    EventLiveResponse,
     Fixture,
     FPLEntry,
     SquadPicksResponse,
@@ -71,3 +72,23 @@ class FPLClient:
             data: dict[str, Any] = response.json()
 
         return SquadPicksResponse.model_validate(data)
+
+    async def get_event_live(self, gameweek: int) -> EventLiveResponse:
+        """Fetch actual per-player points for a gameweek.
+
+        Only meaningful once the gameweek has kicked off; FPL reports
+        `total_points: 0` for players who have not yet played rather
+        than omitting them, and the same for a gameweek that has not
+        started at all - callers that need to know whether a gameweek
+        is actually finished should check `Gameweek.finished` from
+        `get_bootstrap_static`, not infer it from this response.
+        """
+        url = f"{self.BASE_URL}/event/{gameweek}/live/"
+
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            data: dict[str, Any] = response.json()
+
+        return EventLiveResponse.model_validate(data)
