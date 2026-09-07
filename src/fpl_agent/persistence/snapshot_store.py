@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,25 @@ from fpl_agent.decisions.snapshot import DecisionSnapshot, SnapshotPlayer, Snaps
 # at zero (sqlite3 is part of the Python standard library). Already
 # gitignored (*.db) so it never gets committed.
 DEFAULT_DB_PATH = "decisions.db"
+
+# Containers must keep this file on a mounted volume instead of the
+# image's writable layer, which is discarded when the container is
+# recreated - snapshots are write-once records of what was
+# recommended before a deadline, so losing them destroys the
+# evaluation history permanently.
+DB_PATH_ENV_VAR = "FPL_DB_PATH"
+
+
+def resolve_default_db_path() -> str:
+    """Return the configured SQLite location, or the local default.
+
+    Read at call time rather than import time so that a process which
+    sets the variable after this module is imported still gets the
+    configured location. An unset or empty value falls back to the
+    original local ``decisions.db``, so existing local runs and the
+    test suite behave exactly as before.
+    """
+    return os.environ.get(DB_PATH_ENV_VAR) or DEFAULT_DB_PATH
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS decision_snapshots (
@@ -126,12 +146,17 @@ class SnapshotStore:
     gameweek's original recommendation is permanent once recorded.
     """
 
-    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        # An explicit path always wins, so tests passing `:memory:` or
+        # a tmp_path are unaffected by the environment; only the
+        # unconfigured case consults FPL_DB_PATH.
+        resolved_path = resolve_default_db_path() if db_path is None else db_path
+
         # A single long-lived connection: sqlite3's `:memory:` database
         # is per-connection, so tests that pass `:memory:` need every
         # call on this instance to reuse the same connection rather
         # than opening (and losing) a fresh one each time.
-        self._connection = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._connection = sqlite3.connect(str(resolved_path), check_same_thread=False)
         self._connection.execute(_SCHEMA)
         self._connection.commit()
 

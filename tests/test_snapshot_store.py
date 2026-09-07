@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from fpl_agent.decisions.snapshot import DecisionSnapshot, SnapshotPlayer, SnapshotTransfer
-from fpl_agent.persistence.snapshot_store import SnapshotStore
+from fpl_agent.persistence.snapshot_store import (
+    DB_PATH_ENV_VAR,
+    DEFAULT_DB_PATH,
+    SnapshotStore,
+    resolve_default_db_path,
+)
 
 
 def make_snapshot(
@@ -141,3 +148,63 @@ def test_schema_survives_being_initialized_twice_against_the_same_file(tmp_path:
     retrieved = second_store.get_snapshot(entry_id=8731757, gameweek=3)
 
     assert retrieved == snapshot
+
+
+def test_default_db_path_is_used_when_the_environment_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(DB_PATH_ENV_VAR, raising=False)
+
+    assert resolve_default_db_path() == DEFAULT_DB_PATH
+
+
+def test_environment_overrides_the_default_db_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Containers point this at a mounted volume so write-once
+    snapshots outlive the container's writable layer."""
+    monkeypatch.setenv(DB_PATH_ENV_VAR, "/data/decisions.db")
+
+    assert resolve_default_db_path() == "/data/decisions.db"
+
+
+def test_empty_environment_value_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unset variable and one set to the empty string arrive
+    identically in most container runtimes, so both must fall back
+    rather than trying to open a database at "" ."""
+    monkeypatch.setenv(DB_PATH_ENV_VAR, "")
+
+    assert resolve_default_db_path() == DEFAULT_DB_PATH
+
+
+def test_store_without_an_explicit_path_writes_to_the_configured_location(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    configured = tmp_path / "configured.db"
+    monkeypatch.setenv(DB_PATH_ENV_VAR, str(configured))
+    snapshot = make_snapshot()
+
+    SnapshotStore().save_snapshot_if_absent(snapshot)
+
+    assert configured.exists()
+    assert SnapshotStore().get_snapshot(entry_id=8731757, gameweek=3) == snapshot
+
+
+def test_explicit_path_wins_over_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The test suite and any caller passing a path must stay immune to
+    ambient configuration - otherwise a set FPL_DB_PATH would silently
+    redirect tests that pass `:memory:`."""
+    ignored = tmp_path / "ignored.db"
+    explicit = tmp_path / "explicit.db"
+    monkeypatch.setenv(DB_PATH_ENV_VAR, str(ignored))
+
+    SnapshotStore(explicit).save_snapshot_if_absent(make_snapshot())
+
+    assert explicit.exists()
+    assert not ignored.exists()

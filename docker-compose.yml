@@ -1,0 +1,37 @@
+# Local development / verification harness for the containerised backend.
+#
+# Its real job is the SQLite volume: decision snapshots are write-once, so
+# the database has to outlive any single container. The named volume below
+# is owned by Docker rather than by the container, which means
+# `docker compose down` followed by `docker compose up` recreates the
+# container against the same data.
+#
+# No secrets are defined here. The deterministic decision API reads no
+# environment variables other than the two below and does not need an
+# OPENAI_API_KEY. If a future feature needs one, pass it at run time
+# (`docker compose run -e ...`) or add an `env_file:` entry pointing at an
+# untracked .env - never inline the value into this file.
+
+services:
+  api:
+    build:
+      context: .
+    image: fpl-intelligence-agent:local
+    container_name: fpl-intelligence-api
+    ports:
+      - "8000:8000"
+    environment:
+      # Must stay under the mount point below, otherwise the database is
+      # written into the container layer and lost on recreate.
+      FPL_DB_PATH: /data/decisions.db
+      PORT: "8000"
+    volumes:
+      - decisions-data:/data
+    restart: unless-stopped
+
+volumes:
+  # Named rather than a bind mount: Docker seeds a fresh named volume from
+  # the image, so /data keeps the appuser ownership set in the Dockerfile.
+  # A host bind mount would instead impose host UIDs and can leave the
+  # unprivileged container user unable to write the database.
+  decisions-data:

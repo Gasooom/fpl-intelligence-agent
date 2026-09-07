@@ -1,0 +1,57 @@
+# Everything here is excluded from the build context. The image only needs
+# pyproject.toml, src/ and app/ (see Dockerfile), so this both keeps the
+# context small and makes it impossible to bake local secrets or a local
+# database into a layer by accident.
+
+# Git metadata
+.git
+.gitignore
+.gitattributes
+.github
+
+# Secrets and local state - must never reach an image.
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+
+# Local virtualenv (large, platform-specific, and rebuilt by the builder
+# stage from pyproject.toml anyway).
+.venv
+venv
+ENV
+
+# Bytecode and tool caches
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Build artifacts. src/*.egg-info matters in particular: stale metadata in
+# the context can confuse the setuptools build in the builder stage.
+dist
+build
+*.egg-info
+
+# Development-only files that no runtime code imports. Verified: nothing in
+# app/ or src/ references sample_data, and pyproject.toml declares no
+# readme, so omitting README.md cannot break the build.
+tests
+docs
+sample_data
+README.md
+
+# Docker's own files - not needed inside the image.
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# Editors and OS cruft
+.vscode
+.idea
+.DS_Store
+Thumbs.db
