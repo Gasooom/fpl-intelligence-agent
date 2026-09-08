@@ -331,6 +331,27 @@
       return `<span class="badge priority-${priority}">${priority}</span>`;
     }
 
+    // Drops blank, whitespace-only and non-string entries so a reason
+    // the API returned empty can never become a bullet with nothing
+    // beside it. Only ever removes entries - real wording is passed
+    // through untouched, never reworded or added to.
+    function nonEmptyReasons(reasons) {
+      return (reasons || []).filter(
+        (reason) => typeof reason === "string" && reason.trim() !== ""
+      );
+    }
+
+    // Renders the list only when something real survives filtering;
+    // otherwise nothing at all, rather than an empty <ul> or a row of
+    // markerless bullets.
+    function reasonsListHtml(reasons) {
+      const items = nonEmptyReasons(reasons);
+      if (!items.length) {
+        return "";
+      }
+      return `<ul>${items.map((r) => `<li>${r}</li>`).join("")}</ul>`;
+    }
+
     function playerCardHtml(player) {
       return `
         <div class="player-card">
@@ -401,7 +422,7 @@
             <span>Price change: ${bestTransfer.price_change >= 0 ? "+" : ""}${bestTransfer.price_change}</span>
             ${priorityBadge(bestTransfer.priority)}
           </div>
-          <ul>${bestTransfer.reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+          ${reasonsListHtml(bestTransfer.reasons)}
         </div>`;
     }
 
@@ -419,7 +440,7 @@
         <div class="transfer-card">
           <div class="move">${pair.sell.web_name} &rarr; ${pair.buy.web_name} ${priorityBadge(pair.priority)}</div>
           <div class="figures">+${pair.net_improvement} expected points &middot; risk change ${pair.risk_change}</div>
-          <ul>${pair.reasons.map((r) => `<li>${r}</li>`).join("")}</ul>
+          ${reasonsListHtml(pair.reasons)}
         </div>`,
           )
           .join("");
@@ -433,14 +454,22 @@
       }
       container.innerHTML = candidates
         .slice(0, 5)
-        .map(
-          (c) => `
+        .map((c) => {
+          const reasons = nonEmptyReasons(c.reasons);
+          // The reasons row is omitted entirely when there is nothing
+          // to say, rather than left as an empty bullet under the
+          // candidate.
+          const reasonsRow = reasons.length
+            ? `
+        <li class="reasons" style="border-bottom:none;padding-top:0;">${reasons.join(" &middot; ")}</li>`
+            : "";
+
+          return `
         <li>
           <span>#${c.rank} ${c.web_name}</span>
           <span>${c[scoreField]}</span>
-        </li>
-        <li class="reasons" style="border-bottom:none;padding-top:0;">${c.reasons.join(" &middot; ")}</li>`,
-        )
+        </li>${reasonsRow}`;
+        })
         .join("");
     }
 

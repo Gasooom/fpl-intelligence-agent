@@ -33,6 +33,43 @@ def test_demo_page_calls_the_existing_decision_endpoint() -> None:
     assert "/api/v1/decision/" in response.text
 
 
+def test_demo_page_filters_blank_reasons_before_rendering_a_list() -> None:
+    """Every reason list on the page must go through the blank filter, so
+    a reason the API returned empty can never render as a bullet with
+    nothing beside it.
+    """
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert "function nonEmptyReasons(" in body
+    assert 'reason.trim() !== ""' in body
+    assert "function reasonsListHtml(" in body
+
+
+def test_demo_page_never_renders_reason_lists_unfiltered() -> None:
+    """Regression: the transfer and candidate lists previously mapped the
+    raw reasons array straight into <li> elements, so a blank entry
+    became an empty bullet. That pattern must not come back.
+    """
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert "bestTransfer.reasons.map(" not in body
+    assert "pair.reasons.map(" not in body
+    assert "c.reasons.join(" not in body
+
+
+def test_demo_page_omits_a_reason_list_entirely_when_nothing_survives() -> None:
+    """An emptied-out list renders as nothing at all rather than an empty
+    <ul> or a stray bullet.
+    """
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert "if (!items.length) {" in body
+    assert 'return "";' in body
+
+
 def test_demo_page_does_not_prefill_a_default_entry_id() -> None:
     """8731757 may appear only as a placeholder hint (e.g. "e.g. 8731757"),
     never as a pre-filled input value that would submit automatically -

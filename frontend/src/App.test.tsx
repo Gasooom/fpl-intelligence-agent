@@ -8,11 +8,13 @@ import type {
 } from './api/types'
 import App from './App'
 import {
+  makeBuyCandidate,
   makeEvaluatedGameweek,
   makeEvidenceBasis,
   makeGameweekDecision,
   makeGameweekEvaluation,
   makeLatestCompletedEvaluation,
+  makeSellCandidate,
   makeSquadPlayerEvaluations,
 } from './test/fixtures'
 import { renderWithProviders } from './test/renderWithProviders'
@@ -493,6 +495,118 @@ describe('App', () => {
 
     // A band with a zero count contributes no bullet at all.
     expect(screen.queryByText(/0 of 11/)).not.toBeInTheDocument()
+  })
+
+  it('renders no empty bullet or marker anywhere, with every section expanded', async () => {
+    // Widened from the <li>-only guard below: a <summary> is also
+    // display:list-item, so it can draw a marker of its own. Every
+    // collapsible is opened first so hidden sections are inspected too.
+    mockApi({
+      decision: makeGameweekDecision({
+        evidence: [
+          { player_id: 11, decision: 'captain', score: 9, reasons: [] },
+          { player_id: 10, decision: 'vice_captain', score: 8, reasons: ['', '   '] },
+          { player_id: 21, decision: 'buy', score: 7, reasons: [] },
+        ],
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+    await screen.findByText('Recommended plan')
+
+    for (const disclosure of Array.from(document.querySelectorAll('details'))) {
+      disclosure.setAttribute('open', 'true')
+    }
+
+    for (const item of Array.from(document.querySelectorAll('li'))) {
+      expect((item.textContent ?? '').trim()).not.toBe('')
+    }
+    for (const summary of Array.from(document.querySelectorAll('summary'))) {
+      expect((summary.textContent ?? '').trim()).not.toBe('')
+      // Anything that keeps display:list-item must not draw a marker.
+      expect(summary.className).toContain('list-none')
+    }
+  })
+
+  it('renders no bullet markers when every evidence array is empty', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        evidence: [
+          { player_id: 11, decision: 'captain', score: 9, reasons: [] },
+          { player_id: 10, decision: 'vice_captain', score: 8, reasons: [] },
+        ],
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+    await screen.findByText('Recommended plan')
+
+    for (const disclosure of Array.from(document.querySelectorAll('details'))) {
+      disclosure.setAttribute('open', 'true')
+    }
+
+    const bulletLists = Array.from(document.querySelectorAll('ul'))
+    for (const list of bulletLists) {
+      // A rendered list must never be empty; an emptied-out one is
+      // replaced by a sentence rather than an empty <ul>.
+      expect(list.querySelectorAll('li').length).toBeGreaterThan(0)
+    }
+    expect(screen.getAllByText('No supporting reasoning is available.').length).toBeGreaterThan(0)
+  })
+
+  it('still renders meaningful evidence in full', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        evidence: [
+          {
+            player_id: 11,
+            decision: 'captain',
+            score: 9,
+            reasons: ['Highest captaincy score', '6.0 expected points'],
+          },
+          { player_id: 10, decision: 'vice_captain', score: 8, reasons: ['Second-highest score'] },
+        ],
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+    await screen.findByText('Recommended plan')
+
+    expect(screen.getByText('Highest captaincy score')).toBeInTheDocument()
+    expect(screen.getByText('6.0 expected points')).toBeInTheDocument()
+    expect(screen.getByText('Second-highest score')).toBeInTheDocument()
+    expect(screen.queryByText('No supporting reasoning is available.')).not.toBeInTheDocument()
+  })
+
+  it('keeps the full candidate pools intact when they are populated', async () => {
+    const sellCandidates = [1, 2, 3, 4].map((n) =>
+      makeSellCandidate({ player_id: n, web_name: `Sell ${n}`, rank: n }),
+    )
+    const buyCandidates = [1, 2, 3, 4].map((n) =>
+      makeBuyCandidate({ player_id: 100 + n, web_name: `Buy ${n}`, rank: n }),
+    )
+    mockApi({
+      decision: makeGameweekDecision({
+        sell_candidates: sellCandidates,
+        buy_candidates: buyCandidates,
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+    await screen.findByRole('heading', { name: /full candidate pools/i })
+
+    for (const disclosure of Array.from(document.querySelectorAll('details'))) {
+      disclosure.setAttribute('open', 'true')
+    }
+
+    for (const candidate of [...sellCandidates, ...buyCandidates]) {
+      expect(screen.getByText(new RegExp(`${candidate.web_name}$`))).toBeInTheDocument()
+    }
+    expect(screen.queryByText('None returned.')).not.toBeInTheDocument()
   })
 
   it('never renders an empty list item anywhere on the dashboard', async () => {
