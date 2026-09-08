@@ -331,13 +331,18 @@
       return `<span class="badge priority-${priority}">${priority}</span>`;
     }
 
-    // Drops blank, whitespace-only and non-string entries so a reason
-    // the API returned empty can never become a bullet with nothing
-    // beside it. Only ever removes entries - real wording is passed
-    // through untouched, never reworded or added to.
+    // Drops blank, whitespace-only, marker-only ("-", "*", "•" and
+    // friends) and non-string entries, so none of them can become a
+    // bullet with nothing beside it. Requiring a letter or digit -
+    // rather than blacklisting glyphs one at a time - covers every
+    // dash and separator variant at once and cannot discard real
+    // wording, since a reason with content always has a letter or a
+    // digit ("Higher expected points: 7.42" survives untouched).
+    // Only ever removes entries - real wording is passed through
+    // unchanged, never reworded or added to.
     function nonEmptyReasons(reasons) {
       return (reasons || []).filter(
-        (reason) => typeof reason === "string" && reason.trim() !== ""
+        (reason) => typeof reason === "string" && /[\p{L}\p{N}]/u.test(reason)
       );
     }
 

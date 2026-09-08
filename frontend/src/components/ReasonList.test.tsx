@@ -28,6 +28,63 @@ describe('ReasonList', () => {
     expect(bulletsIn(container).every((text) => text.trim().length > 0)).toBe(true)
   })
 
+  // --- Marker-only entries ---
+  //
+  // The deployed dashboard rendered rows of bare "-" and "*" glyphs:
+  // entries that survive a whitespace check but say nothing.
+
+  it('renders nothing visible for a list of only marker glyphs', () => {
+    const { container } = render(<ReasonList reasons={['-', '-', '*']} />)
+
+    expect(container.querySelectorAll('li')).toHaveLength(0)
+    expect(container.querySelector('ul')).toBeNull()
+    expect(screen.queryByText('-')).not.toBeInTheDocument()
+    expect(screen.queryByText('*')).not.toBeInTheDocument()
+    expect(screen.getByText('No supporting reasoning is available.')).toBeInTheDocument()
+  })
+
+  it('renders nothing visible for blanks mixed with a marker glyph', () => {
+    const { container } = render(<ReasonList reasons={['', '   ', '-']} />)
+
+    expect(container.querySelectorAll('li')).toHaveLength(0)
+    expect(container.querySelector('ul')).toBeNull()
+    expect(screen.getByText('No supporting reasoning is available.')).toBeInTheDocument()
+  })
+
+  it('keeps only the real reason when markers sit alongside it', () => {
+    const { container } = render(<ReasonList reasons={['Real reason', '-', '*']} />)
+
+    expect(bulletsIn(container)).toEqual(['Real reason'])
+  })
+
+  it('drops every marker, dash and separator variant', () => {
+    const { container } = render(
+      <ReasonList reasons={['•', '–', '—', '·', '**', '- -', '()', '...', 'Kept']} />,
+    )
+
+    expect(bulletsIn(container)).toEqual(['Kept'])
+  })
+
+  it('keeps meaningful text that merely contains punctuation', () => {
+    const { container } = render(
+      <ReasonList
+        reasons={[
+          'Higher expected points: 7.42',
+          'Lower risk (low vs high)',
+          '+2.1 xP',
+          'Neto -> Gakpo',
+        ]}
+      />,
+    )
+
+    expect(bulletsIn(container)).toEqual([
+      'Higher expected points: 7.42',
+      'Lower risk (low vs high)',
+      '+2.1 xP',
+      'Neto -> Gakpo',
+    ])
+  })
+
   it('shows a polished empty state instead of an empty list', () => {
     const { container } = render(<ReasonList reasons={['', '  ', null]} />)
 

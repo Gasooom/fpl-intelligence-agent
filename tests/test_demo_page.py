@@ -42,8 +42,20 @@ def test_demo_page_filters_blank_reasons_before_rendering_a_list() -> None:
         body = client.get("/").text
 
     assert "function nonEmptyReasons(" in body
-    assert 'reason.trim() !== ""' in body
     assert "function reasonsListHtml(" in body
+
+
+def test_demo_page_filters_marker_only_reasons() -> None:
+    """Entries that are nothing but a marker glyph ("-", "*", "•") pass a
+    whitespace check but say nothing, and rendered as bare bullets on
+    the deployed page. The filter requires a letter or a digit, which
+    covers every dash and separator variant while keeping real wording
+    such as "Higher expected points: 7.42" intact.
+    """
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert r"/[\p{L}\p{N}]/u.test(reason)" in body
 
 
 def test_demo_page_never_renders_reason_lists_unfiltered() -> None:

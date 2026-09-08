@@ -110,15 +110,32 @@ export function riskTextClass(riskLevel: string): string {
 }
 
 /**
+ * True when a string carries at least one letter or digit in any
+ * script, i.e. it says something rather than just marking a place.
+ *
+ * Requiring a letter or digit - rather than blacklisting "-", "*", "•"
+ * one glyph at a time - covers every marker, dash and separator
+ * variant at once, including "–", "—", "·", "**" and combinations like
+ * "- -". It cannot discard real wording, because a reason with actual
+ * content always contains a letter or a digit: "Higher expected
+ * points: 7.42" and "+2.1 xP" both survive untouched.
+ */
+function hasReadableContent(value: string): boolean {
+  return /[\p{L}\p{N}]/u.test(value)
+}
+
+/**
  * Defensive guard shared by every reasons-rendering component: drops
- * null/undefined/blank entries so a stray empty string from the
- * backend can never render as an empty bullet. The backend's own
- * populated reasons pass through completely unchanged - this only
- * ever removes entries, never rewords or adds one.
+ * null/undefined/blank entries, and entries that are nothing but a
+ * marker glyph ("-", "*", "•" and friends), so neither can render as a
+ * bullet with no reason beside it. The backend's own populated reasons
+ * pass through completely unchanged - this only ever removes entries,
+ * never rewords, reorders or adds one.
  */
 export function nonEmptyReasons(reasons: (string | null | undefined)[] | null | undefined): string[] {
   return (reasons ?? []).filter(
-    (reason): reason is string => typeof reason === 'string' && reason.trim() !== '',
+    (reason): reason is string =>
+      typeof reason === 'string' && hasReadableContent(reason),
   )
 }
 

@@ -529,6 +529,57 @@ describe('App', () => {
     }
   })
 
+  it('never renders a marker-only reason as content anywhere on the dashboard', async () => {
+    // Production data carried entries that were nothing but "-" or
+    // "*". They pass a whitespace check, so they used to render as
+    // bullets with a bare glyph beside them.
+    const decision = makeGameweekDecision({
+      evidence: [
+        { player_id: 11, decision: 'captain', score: 9, reasons: ['-', '-', '*'] },
+        { player_id: 10, decision: 'vice_captain', score: 8, reasons: ['', '   ', '-'] },
+        { player_id: 21, decision: 'buy', score: 7, reasons: ['Real reason', '-', '*'] },
+      ],
+    })
+    mockApi({
+      decision: {
+        ...decision,
+        best_transfer: decision.best_transfer
+          ? { ...decision.best_transfer, reasons: ['-', '*', '•'] }
+          : null,
+        transfer_recommendations: decision.best_transfer
+          ? [
+              { ...decision.best_transfer, reasons: ['-', '*'] },
+              {
+                ...decision.best_transfer,
+                sell: { ...decision.best_transfer.sell, player_id: 30, web_name: 'Alt Sell' },
+                buy: { ...decision.best_transfer.buy, player_id: 31, web_name: 'Alt Buy' },
+                reasons: ['•', '—'],
+              },
+            ]
+          : [],
+        sell_candidates: [{ ...decision.sell_candidates[0], reasons: ['-'] }],
+        buy_candidates: [{ ...decision.buy_candidates[0], reasons: ['*', '  '] }],
+      },
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+    await screen.findByText('Recommended plan')
+
+    for (const disclosure of Array.from(document.querySelectorAll('details'))) {
+      disclosure.setAttribute('open', 'true')
+    }
+
+    for (const item of Array.from(document.querySelectorAll('li'))) {
+      const text = (item.textContent ?? '').trim()
+      expect(text).not.toBe('')
+      // Every rendered bullet must say something, not just mark a spot.
+      expect(/[\p{L}\p{N}]/u.test(text)).toBe(true)
+    }
+    // The one genuine reason in the payload still reaches the screen.
+    expect(screen.getByText('Real reason')).toBeInTheDocument()
+  })
+
   it('renders no bullet markers when every evidence array is empty', async () => {
     mockApi({
       decision: makeGameweekDecision({
