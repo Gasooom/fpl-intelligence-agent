@@ -142,7 +142,7 @@ describe('OtherTransferOptions', () => {
 
     screen.getByText('Armstrong → B.Fernandes').click()
 
-    expect(screen.getByText('No additional reasoning available.')).toBeVisible()
+    expect(screen.getByText('No supporting reasoning is available.')).toBeVisible()
     expect(document.querySelectorAll('li').length).toBe(0)
   })
 

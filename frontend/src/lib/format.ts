@@ -125,7 +125,7 @@ export function nonEmptyReasons(reasons: (string | null | undefined)[] | null | 
 /** Shown in place of an empty bullet list when a backend reasons array
  * is genuinely empty after filtering - an honest statement, never an
  * invented explanation. */
-export const NO_REASONS_FALLBACK = 'No additional reasoning available.'
+export const NO_REASONS_FALLBACK = 'No supporting reasoning is available.'
 
 /**
  * The backend's confidence label -> the word shown to a reader.

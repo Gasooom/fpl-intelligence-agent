@@ -5,6 +5,7 @@ import type { GameweekDecisionResponse, GameweekEvaluationResponse } from './api
 import App from './App'
 import {
   makeEvaluatedGameweek,
+  makeEvidenceBasis,
   makeGameweekDecision,
   makeGameweekEvaluation,
   makeSquadPlayerEvaluations,
@@ -313,6 +314,160 @@ describe('App', () => {
     expect(
       screen.getAllByText('12').some((element) => element.tagName === 'DD'),
     ).toBe(true)
+  })
+
+
+  // --- Production regression guards ---
+  //
+  // These mirror the shape of a real gameweek-2 response (an
+  // early-season squad with a thin minutes sample, one unavailable
+  // pick, and a gameweek that cannot yet be evaluated), which is where
+  // the deployed dashboard showed empty bullets and stale wording.
+
+  it('renders real evidence factors, never empty bullets, when evidence is limited', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        confidence: 'Low',
+        evidence_basis: makeEvidenceBasis({
+          level: 'Low',
+          average_sample_confidence: 0.25,
+          players_considered: 11,
+          limited_sample_players: 11,
+          partial_sample_players: 0,
+          full_sample_players: 0,
+          limited_sample_minutes: 450,
+        }),
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    expect(screen.getByText('Limited')).toBeInTheDocument()
+    expect(screen.getByText('Why is the evidence limited?')).toBeInTheDocument()
+
+    // The real sentences, built from the real basis values.
+    expect(
+      screen.getByText('11 of 11 selected players have under 450 minutes played this season.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Average playing-time evidence across the selected eleven is 25%.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Moderate evidence begins at 50%, strong evidence at 75%.'),
+    ).toBeInTheDocument()
+
+    // A band with a zero count contributes no bullet at all.
+    expect(screen.queryByText(/0 of 11/)).not.toBeInTheDocument()
+  })
+
+  it('never renders an empty list item anywhere on the dashboard', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        confidence: 'Low',
+        evidence_basis: makeEvidenceBasis({ level: 'Low' }),
+        // Blank strings the backend could emit must never become bullets.
+        evidence: [
+          { player_id: 11, decision: 'captain', score: 9, reasons: ['Highest captaincy score', ''] },
+          { player_id: 10, decision: 'vice_captain', score: 8, reasons: ['   ', ''] },
+          { player_id: 21, decision: 'buy', score: 7, reasons: [] },
+        ],
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    const bullets = Array.from(document.querySelectorAll('li'))
+    expect(bullets.length).toBeGreaterThan(0)
+    for (const bullet of bullets) {
+      expect((bullet.textContent ?? '').trim()).not.toBe('')
+    }
+  })
+
+  it('shows a polished empty state instead of empty bullets when reasoning is blank', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        evidence: [
+          { player_id: 11, decision: 'captain', score: 9, reasons: ['', '  '] },
+        ],
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    expect(screen.getAllByText('No supporting reasoning is available.').length).toBeGreaterThan(0)
+  })
+
+  it('shows no old confidence terminology anywhere in the user-facing dashboard', async () => {
+    mockApi({
+      decision: makeGameweekDecision({
+        confidence: 'Low',
+        evidence_basis: makeEvidenceBasis({ level: 'Low' }),
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    const pageText = document.body.textContent ?? ''
+    expect(pageText).not.toMatch(/decision confidence/i)
+    expect(pageText).not.toMatch(/low confidence/i)
+    expect(pageText).not.toMatch(/confidence:\s*low/i)
+    expect(pageText).toContain('Evidence:')
+    expect(pageText).toContain('Limited')
+  })
+
+  it('renders the bench exactly as the API returns it, even when a pick is unavailable', async () => {
+    // An unavailable squad member (transferred abroad, injured out, or
+    // removed from the game) is excluded by the engine, so a 15-man
+    // squad legitimately yields 11 starters and 3 bench players. The
+    // UI must report that honestly rather than padding to 4.
+    const full = makeGameweekDecision()
+    mockApi({
+      decision: makeGameweekDecision({
+        bench: full.bench.slice(0, 3),
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    const benchHeading = screen.getByRole('heading', { name: /^bench/i })
+    expect(benchHeading).toHaveTextContent('3')
+    expect(benchHeading).not.toHaveTextContent('4')
+  })
+
+  it('renders a full four-man bench unchanged when the API returns four', async () => {
+    mockApi()
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByText('Recommended plan')
+
+    expect(screen.getByRole('heading', { name: /^bench/i })).toHaveTextContent('4')
+  })
+
+  it('keeps the not-completed evaluation message truthful and fabricates nothing', async () => {
+    const message =
+      'Gameweek 2 has results, but no decision snapshot was recorded for this entry, so this decision cannot be evaluated.'
+    mockApi({
+      evaluation: makeGameweekEvaluation({ status: 'no_snapshot', message }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '2')
+    await screen.findByRole('heading', { name: /decision evaluation/i })
+
+    expect(screen.getByText(message)).toBeInTheDocument()
+    expect(screen.queryByText('Prediction error')).not.toBeInTheDocument()
+    expect(screen.queryByText('Expected points')).not.toBeInTheDocument()
   })
 
   it('renders Other transfer options for transfer_recommendations beyond best_transfer, in backend order', async () => {

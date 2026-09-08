@@ -116,9 +116,15 @@
       font-weight: 600;
       white-space: nowrap;
     }
-    .badge.risk-low, .badge.confidence-high { background: var(--green-bg); color: var(--green); }
-    .badge.risk-medium, .badge.confidence-medium { background: var(--amber-bg); color: var(--amber); }
-    .badge.risk-high, .badge.confidence-low { background: var(--red-bg); color: var(--red); }
+    .badge.risk-low { background: var(--green-bg); color: var(--green); }
+    .badge.risk-medium { background: var(--amber-bg); color: var(--amber); }
+    .badge.risk-high { background: var(--red-bg); color: var(--red); }
+    /* Evidence strength is context, not a pass/fail signal: limited
+       evidence describes a thin playing-time sample, never a weak
+       recommendation, so it is never coloured like a warning. */
+    .badge.confidence-low,
+    .badge.confidence-medium,
+    .badge.confidence-high { background: var(--gray-bg); color: var(--muted); }
     .badge.priority-essential { background: var(--red-bg); color: var(--red); }
     .badge.priority-strong { background: var(--amber-bg); color: var(--amber); }
     .badge.priority-optional { background: var(--gray-bg); color: var(--muted); }
@@ -300,10 +306,8 @@
   </main>
 
   <footer>
-    Every recommendation above is produced by the deterministic decision engine only
-    (projection &rarr; risk &rarr; confidence &rarr; decision). This page performs zero
-    scoring itself - it only calls
-    <code>GET /api/v1/decision/{entry_id}</code> and renders the response.
+    Deterministic Decision Intelligence &mdash; explainable recommendations backed by
+    transparent evidence and outcome evaluation.
   </footer>
 
   <script>
@@ -315,9 +319,12 @@
       return `<span class="badge risk-${riskLevel}">${riskLevel} risk</span>`;
     }
 
+    const EVIDENCE_LABELS = { low: "Limited", medium: "Moderate", high: "Strong" };
+
     function confidenceBadge(confidence) {
       const key = confidence.toLowerCase();
-      return `<span class="badge confidence-${key}">${confidence} confidence</span>`;
+      const label = EVIDENCE_LABELS[key] || confidence;
+      return `<span class="badge confidence-${key}">Evidence: ${label}</span>`;
     }
 
     function priorityBadge(priority) {

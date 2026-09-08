@@ -38,7 +38,7 @@ describe('PrimaryDecision', () => {
         viceCaptain={viceCaptain}
         bestTransfer={bestTransfer}
         confidence="Low"
-        summary="Captain: Cherki. Decision confidence: Low."
+        summary="Captain: Cherki. Vice-captain: Haaland."
       />,
     )
 
@@ -48,7 +48,7 @@ describe('PrimaryDecision', () => {
     expect(screen.getByText('essential')).toBeInTheDocument()
     expect(screen.getByText('Cherki')).toBeInTheDocument()
     expect(screen.getByText('Haaland')).toBeInTheDocument()
-    expect(screen.getByText('Captain: Cherki. Decision confidence: Low.')).toBeInTheDocument()
+    expect(screen.getByText('Captain: Cherki. Vice-captain: Haaland.')).toBeInTheDocument()
   })
 
   // --- Executive summary: readable without knowing FPL shorthand ---

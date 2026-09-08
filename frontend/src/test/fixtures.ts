@@ -189,7 +189,8 @@ export function makeGameweekDecision(
     projected_gameweek_points: 72.0,
     confidence: 'High',
     evidence_basis: makeEvidenceBasis(),
-    decision_summary: 'Captain: Captain Player (9.0 expected points). Decision confidence: High.',
+    decision_summary:
+      'Captain: Captain Player (9.0 expected points). Vice-captain: Vice Player.',
     evidence: [
       { player_id: 11, decision: 'captain', score: 9.0, reasons: ['Highest captaincy score'] },
     ],

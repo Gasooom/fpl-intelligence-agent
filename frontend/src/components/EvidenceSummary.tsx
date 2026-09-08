@@ -1,7 +1,8 @@
 import type { EvidenceResponse, TransferRecommendationResponse } from '../api/types'
-import { NO_REASONS_FALLBACK, nonEmptyReasons } from '../lib/format'
+import { nonEmptyReasons } from '../lib/format'
 import { resolvePlayerName } from '../lib/playerLookup'
 import { CollapsibleSection } from './CollapsibleSection'
+import { ReasonList } from './ReasonList'
 
 interface EvidenceSummaryProps {
   evidence: EvidenceResponse[]
@@ -49,15 +50,7 @@ function EvidenceGroup({
   return (
     <div>
       <p className="text-sm text-text">{title}</p>
-      {reasons.length > 0 ? (
-        <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-text-secondary">
-          {reasons.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-text-muted">{NO_REASONS_FALLBACK}</p>
-      )}
+      <ReasonList reasons={reasons} />
     </div>
   )
 }
@@ -126,26 +119,14 @@ export function EvidenceSummary({
           {rest.length > 0 && (
             <CollapsibleSection summary="View all evidence">
               <div className="flex flex-col gap-5">
-                {rest.map((item, index) => {
-                  const reasons = nonEmptyReasons(item.reasons)
-
-                  return (
-                    <div key={`${item.decision}-${item.player_id}-${index}`}>
-                      <p className="text-sm text-text">
-                        {item.decision} — {resolvePlayerName(nameLookup, item.player_id)}
-                      </p>
-                      {reasons.length > 0 ? (
-                        <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-text-secondary">
-                          {reasons.map((reason) => (
-                            <li key={reason}>{reason}</li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm text-text-muted">{NO_REASONS_FALLBACK}</p>
-                      )}
-                    </div>
-                  )
-                })}
+                {rest.map((item, index) => (
+                  <div key={`${item.decision}-${item.player_id}-${index}`}>
+                    <p className="text-sm text-text">
+                      {item.decision} — {resolvePlayerName(nameLookup, item.player_id)}
+                    </p>
+                    <ReasonList reasons={item.reasons} />
+                  </div>
+                ))}
               </div>
             </CollapsibleSection>
           )}

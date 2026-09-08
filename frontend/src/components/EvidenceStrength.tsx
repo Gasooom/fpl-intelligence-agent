@@ -2,6 +2,7 @@ import type { EvidenceBasisResponse } from '../api/types'
 import { buildEvidenceFactors } from '../lib/evidenceFactors'
 import { evidenceStrengthLabel } from '../lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
+import { ReasonList } from './ReasonList'
 
 interface EvidenceStrengthProps {
   confidence: string
@@ -40,11 +41,11 @@ export function EvidenceStrength({ confidence, basis }: EvidenceStrengthProps) {
           course of action.
         </p>
 
-        <ul className="max-w-xl list-inside list-disc space-y-1 text-sm text-text-secondary">
-          {factors.map((factor) => (
-            <li key={factor}>{factor}</li>
-          ))}
-        </ul>
+        <ReasonList
+          reasons={factors}
+          emptyMessage="Playing-time evidence for this decision is not available."
+          className="max-w-xl list-inside list-disc space-y-1 text-sm text-text-secondary"
+        />
 
         <p className="max-w-xl text-sm leading-relaxed text-text-muted">
           Evidence strengthens as players accumulate minutes through the season.

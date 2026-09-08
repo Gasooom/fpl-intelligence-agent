@@ -200,7 +200,7 @@ def make_gameweek_decision(
         # the fixture can never describe a basis the engine would not
         # have produced.
         evidence_basis=build_evidence_basis(starting_xi),
-        decision_summary="Captain: Player 11 (6.0 expected points). Decision confidence: High.",
+        decision_summary="Captain: Player 11 (6.0 expected points). Vice-captain: Player 10.",
         evidence=evidence or [],
     )
 

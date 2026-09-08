@@ -345,12 +345,17 @@ def _build_summary(
     squad_decision: SquadDecision,
     transfer_pairs: list[TransferPair],
     best_transfer: TransferPair | None,
-    confidence: str,
 ) -> str:
     """Build a deterministic natural-language summary from computed facts.
 
     No LLM is used here: this is plain string formatting over already
     -computed deterministic values.
+
+    Deliberately says nothing about confidence. The label and the
+    figures behind it travel as structured fields (`confidence` and
+    `evidence_basis`), which a client can present in its own words;
+    restating one of them as prose here would duplicate that vocabulary
+    in a second place and let the two drift apart.
     """
     captain = squad_decision.captain
     vice_captain = squad_decision.vice_captain
@@ -393,8 +398,6 @@ def _build_summary(
             f"({signed_gain} expected points, "
             f"{best_transfer.priority}).",
         )
-
-    parts.append(f"Decision confidence: {confidence}.")
 
     return " ".join(parts)
 
@@ -467,7 +470,6 @@ def build_gameweek_decision(
         squad_decision,
         transfer_pairs,
         best_transfer,
-        confidence,
     )
 
     # Mirrors official FPL scoring (see PROJECT_ROOT/README.md and the

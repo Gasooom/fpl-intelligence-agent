@@ -238,7 +238,10 @@ def test_build_gameweek_decision_returns_full_structure() -> None:
 
     assert decision.confidence in {"High", "Medium", "Low"}
     assert "Captain" in decision.decision_summary
-    assert "Decision confidence" in decision.decision_summary
+    # The confidence label travels as a structured field, never as
+    # prose in the summary - restating it there duplicated vocabulary
+    # the presentation layer owns and let the two drift apart.
+    assert "confidence" not in decision.decision_summary.lower()
 
     assert decision.evidence
     assert all(
@@ -723,3 +726,33 @@ def test_built_decision_carries_a_basis_consistent_with_its_confidence() -> None
     assert basis.level == decision.confidence
     assert basis.players_considered == len(decision.starting_xi)
     assert basis == build_evidence_basis(decision.starting_xi)
+
+
+def test_decision_summary_carries_no_confidence_terminology() -> None:
+    """Regression guard for user-facing wording.
+
+    The dashboard presents evidence strength in its own vocabulary
+    ("Evidence: Limited"). A summary that also said "Decision
+    confidence: Low." put stale, contradictory wording on screen, so
+    the summary must stay free of that terminology entirely.
+    """
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    summary = decision.decision_summary.lower()
+
+    assert "confidence" not in summary
+    assert "decision confidence" not in summary
+    for label in ("low", "medium", "high"):
+        assert f"confidence: {label}" not in summary
+
+    # The summary still carries its real content.
+    assert "Captain:" in decision.decision_summary
+    assert decision.confidence in {"High", "Medium", "Low"}

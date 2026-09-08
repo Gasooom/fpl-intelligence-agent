@@ -146,7 +146,7 @@ describe('EvidenceSummary', () => {
     )
 
     expect(screen.getByText('Captain — Cherki')).toBeInTheDocument()
-    expect(screen.getByText('No additional reasoning available.')).toBeInTheDocument()
+    expect(screen.getByText('No supporting reasoning is available.')).toBeInTheDocument()
     expect(document.querySelectorAll('li').length).toBe(0)
   })
 
@@ -188,7 +188,7 @@ describe('EvidenceSummary', () => {
     )
 
     expect(screen.getByText(/must_play — Other Player/)).toBeInTheDocument()
-    expect(screen.getByText('No additional reasoning available.')).toBeInTheDocument()
+    expect(screen.getByText('No supporting reasoning is available.')).toBeInTheDocument()
   })
 
   it('shows a deliberate empty state for an empty evidence array', () => {

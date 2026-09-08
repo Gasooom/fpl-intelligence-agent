@@ -2,6 +2,7 @@ import type { TransferRecommendationResponse } from '../api/types'
 import { capitalize, formatPoints, nonEmptyReasons } from '../lib/format'
 import { CollapsibleSection } from './CollapsibleSection'
 import { Panel } from './Panel'
+import { ReasonList } from './ReasonList'
 
 interface WhyThisDecisionProps {
   bestTransfer: TransferRecommendationResponse | null
@@ -102,11 +103,10 @@ export function WhyThisDecision({ bestTransfer }: WhyThisDecisionProps) {
 
       {reasons.length > 0 && (
         <CollapsibleSection summary="Full reasoning">
-          <ul className="list-inside list-disc space-y-1 text-sm text-text-secondary">
-            {reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
+          <ReasonList
+            reasons={reasons}
+            className="list-inside list-disc space-y-1 text-sm text-text-secondary"
+          />
         </CollapsibleSection>
       )}
     </Panel>

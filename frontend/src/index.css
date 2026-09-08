@@ -8,8 +8,9 @@
  * and the primary recommendation. Risk gets its own three-way
  * semantic scale (low/medium/high) because that distinction is
  * genuinely load-bearing - but it's applied to text, never to whole
- * card backgrounds. Confidence, deliberately, has no color of its own:
- * it is evidence strength, not a pass/fail signal, so Low confidence
+ * card backgrounds. Evidence strength, deliberately, has no color of
+ * its own: it describes how much playing-time evidence backs a
+ * decision, not whether the decision is good, so "Evidence: Limited"
  * is never styled to look like a warning.
  */
 @theme {
