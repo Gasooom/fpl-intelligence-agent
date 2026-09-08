@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens - deliberately minimal.
+ *
+ * Near-black / white / gray carry almost all of the interface.
+ * --color-accent is the ONE accent color, used sparingly for actions
+ * and the primary recommendation. Risk gets its own three-way
+ * semantic scale (low/medium/high) because that distinction is
+ * genuinely load-bearing - but it's applied to text, never to whole
+ * card backgrounds. Confidence, deliberately, has no color of its own:
+ * it is evidence strength, not a pass/fail signal, so Low confidence
+ * is never styled to look like a warning.
+ */
+@theme {
+  --color-bg: #0b0b0c;
+  --color-surface: #131315;
+  --color-border: #232325;
+  /* 3.04:1 on --color-bg - meets WCAG 1.4.11 for interactive control
+     boundaries (form inputs). --color-border stays softer and is only
+     ever used for decorative dividers, which carry no such
+     requirement. */
+  --color-border-strong: #5e5e60;
+
+  --color-text: #f2f2ef;
+  --color-text-secondary: #a8a8ac;
+  /* 4.80:1 on --color-bg - meets WCAG AA (4.5:1) for normal-size text. */
+  --color-text-muted: #7d7d81;
+
+  --color-accent: #4d7cf5;
+
+  --color-risk-low: #4f9d6e;
+  --color-risk-medium: #b98a3d;
+  --color-risk-high: #c85c53;
+
+  /* Evaluation outcome semantics - deliberately separate tokens from
+     the risk scale even where the value matches, because "this
+     decision worked out" and "this player is risky" are different
+     concepts and should be free to diverge. Both verified against
+     --color-surface: 5.64:1 and 4.52:1, meeting WCAG AA for normal
+     text. Applied to outcome labels and key differences only, never
+     to a whole panel. */
+  --color-eval-positive: #4f9d6e;
+  --color-eval-negative: #c85c53;
+
+  /* Panel boundary: a touch stronger than the hairline divider so a
+     grouping box reads as a box, still quiet enough not to become a
+     card outline competing with the content. */
+  --color-border-panel: #2b2b2e;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100svh;
+}
