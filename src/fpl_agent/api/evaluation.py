@@ -3,6 +3,7 @@ from __future__ import annotations
 from fpl_agent.api.evaluation_schemas import (
     CaptainEvaluationResponse,
     GameweekEvaluationResponse,
+    LatestCompletedEvaluationResponse,
     PlayerEvaluationResponse,
     StartingXIEvaluationResponse,
     TransferEvaluationResponse,
@@ -106,4 +107,23 @@ def gameweek_evaluation_to_response(
             _player_evaluation_to_response(player)
             for player in evaluation.bench_players
         ],
+    )
+
+
+def latest_completed_evaluation_to_response(
+    evaluation: GameweekEvaluation | None,
+) -> LatestCompletedEvaluationResponse:
+    """Convert the latest-completed-gameweek lookup to an API response.
+
+    `evaluation` is None exactly when no completed gameweek before the
+    current one has a recorded decision snapshot yet - that maps to
+    `available=False` and a null `evaluation`, never a fabricated one.
+    """
+    return LatestCompletedEvaluationResponse(
+        available=evaluation is not None,
+        evaluation=(
+            gameweek_evaluation_to_response(evaluation)
+            if evaluation is not None
+            else None
+        ),
     )

@@ -5,6 +5,10 @@ import { Panel } from './Panel'
 interface PlayerPredictionsProps {
   startingXiPlayers: PlayerEvaluationResponse[]
   benchPlayers: PlayerEvaluationResponse[]
+  /** The gameweek these rows belong to, straight from the evaluation
+   * they came from - so a table showing a previous gameweek's results
+   * can never be mistaken for the current one. */
+  gameweek?: number
 }
 
 function ColumnHeadings() {
@@ -91,14 +95,23 @@ function groupByPosition(
  * results, and the difference between them was computed by the
  * backend. Nothing on this screen is derived in the browser.
  */
-export function PlayerPredictions({ startingXiPlayers, benchPlayers }: PlayerPredictionsProps) {
+export function PlayerPredictions({
+  startingXiPlayers,
+  benchPlayers,
+  gameweek,
+}: PlayerPredictionsProps) {
   if (startingXiPlayers.length === 0 && benchPlayers.length === 0) {
     return null
   }
 
   return (
     <Panel>
-      <h2 className="text-base font-medium text-text">Player predictions</h2>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-base font-medium text-text">Player predictions</h2>
+        {gameweek !== undefined && (
+          <span className="text-xs text-text-muted">Gameweek {gameweek}</span>
+        )}
+      </div>
       <p className="mt-1 text-sm text-text-muted">
         Expected vs actual points for the squad.
       </p>

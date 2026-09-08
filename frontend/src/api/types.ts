@@ -270,6 +270,21 @@ export interface GameweekEvaluationResponse {
   bench_players: PlayerEvaluationResponse[]
 }
 
+/** The evaluation of the most recent completed gameweek with a recorded
+ * decision snapshot, returned by
+ * GET /api/v1/evaluation/{entry_id}/latest-completed.
+ *
+ * Independent of whichever gameweek /evaluation/{entry_id} resolves to
+ * - it always looks strictly before the current gameweek. `available`
+ * is false and `evaluation` is null when no completed gameweek has a
+ * recorded snapshot yet; render that as an honest empty state, never as
+ * zeros. When `available` is true, `evaluation.status` is always
+ * "evaluated". */
+export interface LatestCompletedEvaluationResponse {
+  available: boolean
+  evaluation: GameweekEvaluationResponse | null
+}
+
 /** Shape of a FastAPI error response body. `detail` is a plain string
  * for HTTPException (400) and a list of validation error objects for
  * request-validation failures (422). */

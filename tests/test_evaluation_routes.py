@@ -42,10 +42,13 @@ class FakeDecisionService:
         self,
         evaluation: GameweekEvaluation | None = None,
         error: Exception | None = None,
+        latest_completed_evaluation: GameweekEvaluation | None = None,
     ) -> None:
         self.evaluation = evaluation
         self.error = error
+        self.latest_completed_evaluation = latest_completed_evaluation
         self.calls: list[dict[str, int | None]] = []
+        self.latest_completed_calls: list[int] = []
 
     async def evaluate_gameweek(
         self,
@@ -59,6 +62,17 @@ class FakeDecisionService:
 
         assert self.evaluation is not None
         return self.evaluation
+
+    async def evaluate_latest_completed_gameweek(
+        self,
+        entry_id: int,
+    ) -> GameweekEvaluation | None:
+        self.latest_completed_calls.append(entry_id)
+
+        if self.error is not None:
+            raise self.error
+
+        return self.latest_completed_evaluation
 
 
 @pytest.fixture
@@ -294,3 +308,112 @@ def test_upstream_failure_returns_http_502_rather_than_404(client: TestClient) -
     response = client.get("/api/v1/evaluation/8731757")
 
     assert response.status_code == 502
+
+
+# --- GET /api/v1/evaluation/{entry_id}/latest-completed ---
+
+
+def make_evaluated_gameweek(gameweek: int = 3) -> GameweekEvaluation:
+    return GameweekEvaluation(
+        entry_id=8731757,
+        gameweek=gameweek,
+        status="evaluated",
+        message=f"Evaluated against actual gameweek {gameweek} results.",
+        decision_generated_at="2026-08-10T09:00:00+00:00",
+        captain=CaptainEvaluation(
+            captain_player_id=1,
+            captain_web_name="Cherki",
+            captain_expected_points=10.31,
+            vice_captain_player_id=2,
+            vice_captain_web_name="Haaland",
+            captain_actual_points=12,
+            vice_captain_actual_points=4,
+            outcome="correct",
+        ),
+        starting_xi=StartingXIEvaluation(
+            starting_xi_actual_total=55,
+            bench_actual_total=6,
+            difference=49,
+            starting_xi_expected_total=60.5,
+            prediction_error=-5.5,
+        ),
+        best_transfer=None,
+        starting_xi_players=[make_player_evaluation()],
+        bench_players=[],
+    )
+
+
+def test_latest_completed_evaluation_available_returns_evaluated_payload(
+    client: TestClient,
+) -> None:
+    fake_service = FakeDecisionService(
+        latest_completed_evaluation=make_evaluated_gameweek(gameweek=3),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757/latest-completed")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["evaluation"]["gameweek"] == 3
+    assert payload["evaluation"]["status"] == "evaluated"
+    assert payload["evaluation"]["captain"]["outcome"] == "correct"
+    assert fake_service.latest_completed_calls == [8731757]
+
+
+def test_latest_completed_evaluation_unavailable_returns_null_evaluation(
+    client: TestClient,
+) -> None:
+    """No completed gameweek has a recorded snapshot yet - the response
+    must say so honestly rather than fabricating one."""
+    fake_service = FakeDecisionService(latest_completed_evaluation=None)
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757/latest-completed")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["evaluation"] is None
+
+
+def test_latest_completed_evaluation_upstream_not_found_returns_http_404(
+    client: TestClient,
+) -> None:
+    fake_service = FakeDecisionService(
+        error=FPLResourceNotFoundError(
+            "FPL entry 8731757 was not found in the official FPL API.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757/latest-completed")
+
+    assert response.status_code == 404
+
+
+def test_latest_completed_evaluation_response_matches_deterministic_schema(
+    client: TestClient,
+) -> None:
+    fake_service = FakeDecisionService(
+        latest_completed_evaluation=make_evaluated_gameweek(gameweek=3),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757/latest-completed")
+    payload = response.json()
+
+    assert set(payload.keys()) == {"available", "evaluation"}
+    assert set(payload["evaluation"].keys()) == {
+        "entry_id",
+        "gameweek",
+        "status",
+        "message",
+        "decision_generated_at",
+        "captain",
+        "starting_xi",
+        "best_transfer",
+        "starting_xi_players",
+        "bench_players",
+    }

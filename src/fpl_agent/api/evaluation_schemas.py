@@ -85,3 +85,20 @@ class GameweekEvaluationResponse(BaseModel):
     # substitute order. Empty unless status is "evaluated".
     starting_xi_players: list[PlayerEvaluationResponse]
     bench_players: list[PlayerEvaluationResponse]
+
+
+class LatestCompletedEvaluationResponse(BaseModel):
+    """The most recent completed gameweek's evaluation, if one exists yet.
+
+    Separate from GameweekEvaluationResponse's own not_completed/
+    no_snapshot statuses: `available` is False exactly when no completed
+    gameweek before the current one has a recorded decision snapshot at
+    all, in which case `evaluation` is null rather than a fabricated
+    placeholder. When `available` is True, `evaluation.status` is always
+    "evaluated".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    available: bool
+    evaluation: GameweekEvaluationResponse | None

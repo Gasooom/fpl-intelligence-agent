@@ -3,8 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from fpl_agent.api.decision import gameweek_decision_to_response
-from fpl_agent.api.evaluation import gameweek_evaluation_to_response
-from fpl_agent.api.evaluation_schemas import GameweekEvaluationResponse
+from fpl_agent.api.evaluation import (
+    gameweek_evaluation_to_response,
+    latest_completed_evaluation_to_response,
+)
+from fpl_agent.api.evaluation_schemas import (
+    GameweekEvaluationResponse,
+    LatestCompletedEvaluationResponse,
+)
 from fpl_agent.api.schemas import GameweekDecisionResponse
 from fpl_agent.data.errors import (
     FPLDataError,
@@ -145,3 +151,33 @@ async def get_gameweek_evaluation(
         raise _http_error_for(exc) from exc
 
     return gameweek_evaluation_to_response(evaluation)
+
+
+@router.get(
+    "/evaluation/{entry_id}/latest-completed",
+    response_model=LatestCompletedEvaluationResponse,
+)
+async def get_latest_completed_evaluation(
+    entry_id: int,
+    service: FPLDecisionService = Depends(get_decision_service),
+) -> LatestCompletedEvaluationResponse:
+    """Return the evaluation of the most recent completed gameweek that has
+    a recorded decision snapshot for this entry.
+
+    Independent of whichever gameweek `/evaluation/{entry_id}` currently
+    resolves to: this exists so a dashboard can still showcase real
+    evaluation history while the current gameweek is `not_completed`.
+    `available` is False and `evaluation` is null - never a fabricated
+    result - when no completed gameweek before the current one has a
+    recorded snapshot yet. This endpoint is a thin HTTP boundary like
+    the others here: it delegates entirely to
+    `FPLDecisionService.evaluate_latest_completed_gameweek`.
+    """
+    try:
+        evaluation = await service.evaluate_latest_completed_gameweek(
+            entry_id=entry_id,
+        )
+    except FPLDataError as exc:
+        raise _http_error_for(exc) from exc
+
+    return latest_completed_evaluation_to_response(evaluation)

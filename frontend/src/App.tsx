@@ -17,6 +17,7 @@ import { StartingXI } from './components/StartingXI'
 import { WhyThisDecision } from './components/WhyThisDecision'
 import { useGameweekDecision } from './hooks/useGameweekDecision'
 import { useGameweekEvaluation } from './hooks/useGameweekEvaluation'
+import { useLatestCompletedEvaluation } from './hooks/useLatestCompletedEvaluation'
 import { buildPlayerNameLookup } from './lib/playerLookup'
 
 function App() {
@@ -32,6 +33,12 @@ function App() {
   // of the page always describe the same gameweek.
   const evaluationQuery = useGameweekEvaluation(entryId, decision?.gameweek ?? null)
 
+  // Independent of the resolved gameweek above: the backend decides on
+  // its own which completed gameweek (if any) this refers to, so the
+  // dashboard can showcase evaluation even while the current gameweek
+  // is still pending.
+  const latestCompletedQuery = useLatestCompletedEvaluation(entryId)
+
   function handleSubmit(
     newEntryId: number,
     newGameweek: number | null,
@@ -41,6 +48,20 @@ function App() {
     setGameweek(newGameweek)
     setFreeTransfers(newFreeTransfers)
   }
+
+  // The player-by-player table follows whichever evaluation actually
+  // has results: this gameweek's once it has been played, otherwise the
+  // latest completed one the backend already identified. Both payloads
+  // arrive fully computed - nothing here re-derives a player's figures,
+  // and neither one is shown unless the backend returned real rows.
+  const currentEvaluation = evaluationQuery.data
+  const hasCurrentPlayerResults =
+    currentEvaluation !== undefined &&
+    (currentEvaluation.starting_xi_players.length > 0 ||
+      currentEvaluation.bench_players.length > 0)
+  const playerEvaluation = hasCurrentPlayerResults
+    ? currentEvaluation
+    : (latestCompletedQuery.data?.evaluation ?? undefined)
 
   const nameLookup = useMemo(
     () => (decision ? buildPlayerNameLookup(decision) : new Map<number, string>()),
@@ -107,13 +128,17 @@ function App() {
               evaluation={evaluationQuery.data}
               isFetching={evaluationQuery.isFetching}
               error={evaluationQuery.isError ? evaluationQuery.error : null}
+              latestCompleted={latestCompletedQuery.data}
+              latestCompletedFetching={latestCompletedQuery.isFetching}
+              latestCompletedError={latestCompletedQuery.isError ? latestCompletedQuery.error : null}
             />
           </Panel>
 
-          {evaluationQuery.data && (
+          {playerEvaluation && (
             <PlayerPredictions
-              startingXiPlayers={evaluationQuery.data.starting_xi_players}
-              benchPlayers={evaluationQuery.data.bench_players}
+              startingXiPlayers={playerEvaluation.starting_xi_players}
+              benchPlayers={playerEvaluation.bench_players}
+              gameweek={playerEvaluation.gameweek}
             />
           )}
 

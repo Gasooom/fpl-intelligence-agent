@@ -1,13 +1,18 @@
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GameweekDecisionResponse, GameweekEvaluationResponse } from './api/types'
+import type {
+  GameweekDecisionResponse,
+  GameweekEvaluationResponse,
+  LatestCompletedEvaluationResponse,
+} from './api/types'
 import App from './App'
 import {
   makeEvaluatedGameweek,
   makeEvidenceBasis,
   makeGameweekDecision,
   makeGameweekEvaluation,
+  makeLatestCompletedEvaluation,
   makeSquadPlayerEvaluations,
 } from './test/fixtures'
 import { renderWithProviders } from './test/renderWithProviders'
@@ -19,18 +24,27 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** The page calls two endpoints; route each to its own payload so a
- * test never accidentally feeds a decision body to the evaluation
- * query (or vice versa). */
+/** The page calls three endpoints; route each to its own payload so a
+ * test never accidentally feeds one endpoint's body to another query.
+ * The latest-completed endpoint has its own envelope shape and must be
+ * matched before the plain evaluation path, which its URL also starts
+ * with. Defaults to "no completed gameweek on record yet", the honest
+ * state for an entry whose first decision cycle has not finished. */
 function mockApi(options: {
   decision?: GameweekDecisionResponse
   evaluation?: GameweekEvaluationResponse
+  latestCompleted?: LatestCompletedEvaluationResponse
 } = {}) {
   const decision = options.decision ?? makeGameweekDecision()
   const evaluation = options.evaluation ?? makeGameweekEvaluation()
+  const latestCompleted =
+    options.latestCompleted ?? { available: false, evaluation: null }
 
   vi.mocked(fetch).mockImplementation((input) => {
     const url = String(input)
+    if (url.includes('/latest-completed')) {
+      return Promise.resolve(jsonResponse(latestCompleted))
+    }
     if (url.includes('/api/v1/evaluation/')) {
       return Promise.resolve(jsonResponse(evaluation))
     }
@@ -285,10 +299,40 @@ describe('App', () => {
 
     await submitEntryForm('8731757')
 
-    expect(await screen.findByRole('heading', { name: /player predictions/i })).toBeInTheDocument()
+    const heading = await screen.findByRole('heading', { name: /player predictions/i })
+    expect(heading).toBeInTheDocument()
     for (const player of [...squad.startingXi, ...squad.bench]) {
       expect(screen.getByText(player.web_name)).toBeInTheDocument()
     }
+    // Labeled with the gameweek these rows actually belong to.
+    expect(heading.parentElement).toHaveTextContent('Gameweek 5')
+  })
+
+  it('falls back to the latest completed gameweek player table while the current one is pending', async () => {
+    const squad = makeSquadPlayerEvaluations()
+    mockApi({
+      // The current gameweek carries no player rows at all.
+      evaluation: makeGameweekEvaluation({ status: 'not_completed' }),
+      latestCompleted: makeLatestCompletedEvaluation({
+        evaluation: makeEvaluatedGameweek({
+          gameweek: 3,
+          starting_xi_players: squad.startingXi,
+          bench_players: squad.bench,
+        }),
+      }),
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+
+    const heading = await screen.findByRole('heading', { name: /player predictions/i })
+    for (const player of [...squad.startingXi, ...squad.bench]) {
+      expect(screen.getByText(player.web_name)).toBeInTheDocument()
+    }
+    // The table must name the gameweek it came from, never the pending
+    // current one.
+    expect(heading.parentElement).toHaveTextContent('Gameweek 3')
+    expect(heading.parentElement).not.toHaveTextContent('Gameweek 5')
   })
 
   it('does not render player predictions for a gameweek that cannot be evaluated', async () => {
@@ -299,6 +343,23 @@ describe('App', () => {
 
     await screen.findByRole('heading', { name: /decision evaluation/i })
     expect(screen.queryByRole('heading', { name: /player predictions/i })).not.toBeInTheDocument()
+  })
+
+  it('renders no player table at all when neither the current nor a completed gameweek has results', async () => {
+    mockApi({
+      evaluation: makeGameweekEvaluation({ status: 'not_completed' }),
+      latestCompleted: { available: false, evaluation: null },
+    })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+
+    await screen.findByRole('heading', { name: /decision evaluation/i })
+    expect(screen.queryByRole('heading', { name: /player predictions/i })).not.toBeInTheDocument()
+    // The honest empty state stays in place rather than a padded table.
+    expect(
+      screen.getByText(/historical evaluation will appear after the first completed decision cycle/i),
+    ).toBeInTheDocument()
   })
 
   it('shows the captain’s expected points alongside the actual in the evaluation', async () => {

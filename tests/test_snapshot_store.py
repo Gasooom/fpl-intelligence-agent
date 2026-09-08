@@ -193,6 +193,31 @@ def test_store_without_an_explicit_path_writes_to_the_configured_location(
     assert SnapshotStore().get_snapshot(entry_id=8731757, gameweek=3) == snapshot
 
 
+def test_list_snapshot_gameweeks_returns_empty_when_nothing_is_stored() -> None:
+    store = SnapshotStore(":memory:")
+
+    assert store.list_snapshot_gameweeks(entry_id=8731757) == []
+
+
+def test_list_snapshot_gameweeks_returns_newest_first() -> None:
+    store = SnapshotStore(":memory:")
+    store.save_snapshot_if_absent(make_snapshot(gameweek=3))
+    store.save_snapshot_if_absent(make_snapshot(gameweek=5))
+    store.save_snapshot_if_absent(make_snapshot(gameweek=4))
+
+    assert store.list_snapshot_gameweeks(entry_id=8731757) == [5, 4, 3]
+
+
+def test_list_snapshot_gameweeks_is_scoped_to_one_entry() -> None:
+    store = SnapshotStore(":memory:")
+    store.save_snapshot_if_absent(make_snapshot(entry_id=111, gameweek=3))
+    store.save_snapshot_if_absent(make_snapshot(entry_id=222, gameweek=4))
+    store.save_snapshot_if_absent(make_snapshot(entry_id=222, gameweek=5))
+
+    assert store.list_snapshot_gameweeks(entry_id=111) == [3]
+    assert store.list_snapshot_gameweeks(entry_id=222) == [5, 4]
+
+
 def test_explicit_path_wins_over_the_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -315,6 +315,240 @@ async def test_evaluate_gameweek_evaluates_every_player_in_the_recorded_squad() 
         assert player.prediction_error == round(4 - player.expected_points, 2)
 
 
+# --- evaluate_latest_completed_gameweek orchestration ---
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_picks_the_most_recent_evaluable_gameweek() -> None:
+    """Snapshots exist for gameweeks 3 and 4, both now finished, with
+    gameweek 5 the current (unfinished) one - the latest completed
+    evaluation must be gameweek 4, not 3, and must not fetch live
+    results for any other gameweek."""
+    store = SnapshotStore(":memory:")
+
+    for gw in (3, 4):
+        unfinished = make_bootstrap([make_gameweek(gw, finished=False, is_current=True)])
+        service = FPLDecisionService(
+            client=FakeFPLClient(unfinished, PICKS),  # type: ignore[arg-type]
+            snapshot_store=store,
+        )
+        await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=gw)
+
+    now_bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=True),
+            make_gameweek(4, finished=True),
+            make_gameweek(5, finished=False, is_current=True),
+        ],
+    )
+    client = FakeFPLClient(
+        now_bootstrap,
+        PICKS,
+        live_by_gameweek={4: make_live(*{player_id: 5 for player_id in PICKS}.items())},
+    )
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation is not None
+    assert evaluation.gameweek == 4
+    assert evaluation.status == STATUS_EVALUATED
+    assert client.get_event_live_calls == [4]
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_skips_a_finished_gameweek_with_no_snapshot() -> None:
+    """Gameweek 4 finished but was never recorded (no snapshot); the
+    latest evaluable gameweek must fall back to gameweek 3, never
+    reconstructing a decision for 4 from today's data."""
+    store = SnapshotStore(":memory:")
+    unfinished = make_bootstrap([make_gameweek(3, finished=False, is_current=True)])
+    seed_service = FPLDecisionService(
+        client=FakeFPLClient(unfinished, PICKS),  # type: ignore[arg-type]
+        snapshot_store=store,
+    )
+    await seed_service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    now_bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=True),
+            make_gameweek(4, finished=True),
+            make_gameweek(5, finished=False, is_current=True),
+        ],
+    )
+    client = FakeFPLClient(
+        now_bootstrap,
+        PICKS,
+        live_by_gameweek={3: make_live(*{player_id: 5 for player_id in PICKS}.items())},
+    )
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation is not None
+    assert evaluation.gameweek == 3
+    assert client.get_event_live_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_is_none_when_current_gameweek_not_completed_and_no_history() -> None:
+    """Current gameweek not completed, and there is no historical
+    snapshot at all yet - must return None, never a fabricated result."""
+    bootstrap = make_bootstrap([make_gameweek(5, finished=False, is_current=True)])
+    client = FakeFPLClient(bootstrap, PICKS)
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation is None
+    assert client.get_event_live_calls == []
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_returns_history_when_current_gameweek_not_completed() -> None:
+    """Current gameweek (5) is not completed, but gameweek 3 was
+    recorded and has since finished - the dashboard's historical section
+    must still have something real to show."""
+    store = SnapshotStore(":memory:")
+    unfinished = make_bootstrap([make_gameweek(3, finished=False, is_current=True)])
+    seed_service = FPLDecisionService(
+        client=FakeFPLClient(unfinished, PICKS),  # type: ignore[arg-type]
+        snapshot_store=store,
+    )
+    await seed_service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    now_bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=True),
+            make_gameweek(5, finished=False, is_current=True),
+        ],
+    )
+    client = FakeFPLClient(
+        now_bootstrap,
+        PICKS,
+        live_by_gameweek={3: make_live(*{player_id: 5 for player_id in PICKS}.items())},
+    )
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    current_evaluation = await service.evaluate_gameweek(entry_id=ENTRY_ID)
+    latest_completed = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert current_evaluation.status == STATUS_NOT_COMPLETED
+    assert latest_completed is not None
+    assert latest_completed.gameweek == 3
+    assert latest_completed.status == STATUS_EVALUATED
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_never_treats_the_current_gameweeks_own_snapshot_as_history() -> None:
+    """A snapshot recorded for the current gameweek itself - even once
+    that gameweek finishes and is still reported as current - must not
+    be surfaced by the *latest completed* lookup, which only looks at
+    gameweeks strictly before the current one."""
+    store = SnapshotStore(":memory:")
+    unfinished = make_bootstrap([make_gameweek(5, finished=False, is_current=True)])
+    seed_service = FPLDecisionService(
+        client=FakeFPLClient(unfinished, PICKS),  # type: ignore[arg-type]
+        snapshot_store=store,
+    )
+    await seed_service.analyze_gameweek(entry_id=ENTRY_ID)
+
+    finished_still_current = make_bootstrap(
+        [make_gameweek(5, finished=True, is_current=True)],
+    )
+    client = FakeFPLClient(finished_still_current, PICKS)
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation is None
+    assert client.get_event_live_calls == []
+
+
+@pytest.mark.asyncio
+async def test_latest_completed_evaluation_expected_points_come_from_the_snapshot() -> None:
+    """Same guarantee as evaluate_gameweek: expected_points on the
+    latest-completed path are read verbatim from the recorded snapshot,
+    never recomputed from today's bootstrap data."""
+    store = SnapshotStore(":memory:")
+    unfinished = make_bootstrap([make_gameweek(3, finished=False, is_current=True)])
+    seed_service = FPLDecisionService(
+        client=FakeFPLClient(unfinished, PICKS),  # type: ignore[arg-type]
+        snapshot_store=store,
+    )
+    await seed_service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=3)
+    snapshot = store.get_snapshot(entry_id=ENTRY_ID, gameweek=3)
+    assert snapshot is not None
+    snapshot_expected = {p.player_id: p.expected_points for p in snapshot.starting_xi}
+
+    now_bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=True),
+            make_gameweek(5, finished=False, is_current=True),
+        ],
+    )
+    live = make_live(*{p.player_id: 5 for p in snapshot.starting_xi}.items())
+    client = FakeFPLClient(now_bootstrap, PICKS, live_by_gameweek={3: live})
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_latest_completed_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation is not None
+    for player in evaluation.starting_xi_players:
+        assert player.expected_points == snapshot_expected[player.player_id]
+
+
+# --- Gameweek resolution regression (explicit / current / next unaffected) ---
+
+
+@pytest.mark.asyncio
+async def test_resolution_regression_explicit_gameweek_still_wins_over_current() -> None:
+    bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=True),
+            make_gameweek(4, finished=False, is_current=True),
+        ],
+    )
+    client = FakeFPLClient(bootstrap, PICKS, live_by_gameweek={3: make_live()})
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    assert evaluation.gameweek == 3
+
+
+@pytest.mark.asyncio
+async def test_resolution_regression_defaults_to_current_gameweek() -> None:
+    bootstrap = make_bootstrap([make_gameweek(4, finished=False, is_current=True)])
+    client = FakeFPLClient(bootstrap, PICKS)
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation.gameweek == 4
+
+
+@pytest.mark.asyncio
+async def test_resolution_regression_falls_back_to_next_gameweek_with_no_current() -> None:
+    gw = Gameweek(
+        id=6,
+        name="Gameweek 6",
+        deadline_time="2026-08-10T10:00:00Z",
+        finished=False,
+        is_previous=False,
+        is_current=False,
+        is_next=True,
+    )
+    bootstrap = make_bootstrap([gw])
+    client = FakeFPLClient(bootstrap, PICKS)
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    evaluation = await service.evaluate_gameweek(entry_id=ENTRY_ID)
+
+    assert evaluation.gameweek == 6
+    assert evaluation.status == STATUS_NOT_COMPLETED
+
+
 @pytest.mark.asyncio
 async def test_evaluation_expected_points_come_from_the_snapshot_not_todays_data() -> None:
     """The snapshot is the historical record: even when the engine

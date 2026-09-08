@@ -4,12 +4,14 @@ import {
   makeCaptainEvaluation,
   makeEvaluatedGameweek,
   makeGameweekEvaluation,
+  makeLatestCompletedEvaluation,
   makeStartingXIEvaluation,
   makeTransferEvaluation,
 } from '../test/fixtures'
 import { Evaluation } from './Evaluation'
 
 const idle = { isFetching: false, error: null }
+const idleLatest = { latestCompletedFetching: false, latestCompletedError: null }
 
 describe('Evaluation', () => {
   it('presents itself as a first-class section, not a footnote', () => {
@@ -258,5 +260,159 @@ describe('Evaluation', () => {
 
     expect(screen.getByRole('heading', { name: /decision evaluation/i })).toBeInTheDocument()
     expect(screen.queryByText(/actual points/i)).not.toBeInTheDocument()
+  })
+
+  // --- Current Gameweek / Latest Completed Evaluation ---
+
+  it('labels the current gameweek section and shows its evaluation when available', () => {
+    render(<Evaluation evaluation={makeEvaluatedGameweek()} {...idle} />)
+
+    expect(screen.getByRole('heading', { name: 'Current Gameweek' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Captain' })).toBeInTheDocument()
+    expect(screen.queryByText(/evaluation pending/i)).not.toBeInTheDocument()
+  })
+
+  it('shows a compact "Evaluation pending" state for a current gameweek that has not completed', () => {
+    const evaluation = makeGameweekEvaluation({
+      status: 'not_completed',
+      message: 'Gameweek 6 is not completed yet.',
+    })
+
+    render(<Evaluation evaluation={evaluation} {...idle} />)
+
+    expect(screen.getByRole('heading', { name: 'Current Gameweek' })).toBeInTheDocument()
+    expect(screen.getByText('Evaluation pending')).toBeInTheDocument()
+    expect(screen.getByText(/gameweek 6 is not completed yet/i)).toBeInTheDocument()
+  })
+
+  it('does not show the pending badge for a no_snapshot current gameweek', () => {
+    const evaluation = makeGameweekEvaluation({
+      status: 'no_snapshot',
+      message: 'No decision snapshot was recorded for this entry.',
+    })
+
+    render(<Evaluation evaluation={evaluation} {...idle} />)
+
+    expect(screen.queryByText('Evaluation pending')).not.toBeInTheDocument()
+    expect(screen.getByText(/no decision snapshot was recorded/i)).toBeInTheDocument()
+  })
+
+  it('shows the latest completed evaluation, clearly labeled with its gameweek, when the current gameweek is pending', () => {
+    const currentEvaluation = makeGameweekEvaluation({
+      status: 'not_completed',
+      message: 'Gameweek 6 is not completed yet.',
+    })
+    const latestCompleted = makeLatestCompletedEvaluation()
+
+    render(
+      <Evaluation
+        evaluation={currentEvaluation}
+        {...idle}
+        latestCompleted={latestCompleted}
+        {...idleLatest}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Latest Completed Evaluation' })).toBeInTheDocument()
+    expect(screen.getByText('Gameweek 3')).toBeInTheDocument()
+    // The historical section carries its own real captain/starting XI
+    // figures, distinct from the pending current-gameweek section.
+    expect(screen.getAllByRole('heading', { name: 'Captain' })).toHaveLength(1)
+    expect(screen.getByText('Evaluation pending')).toBeInTheDocument()
+  })
+
+  it('renders expected/actual/error for the latest completed evaluation', () => {
+    const latestCompleted = makeLatestCompletedEvaluation({
+      evaluation: makeEvaluatedGameweek({
+        gameweek: 4,
+        starting_xi: makeStartingXIEvaluation({
+          starting_xi_expected_total: 60.5,
+          starting_xi_actual_total: 55,
+          prediction_error: -5.5,
+        }),
+      }),
+    })
+
+    render(
+      <Evaluation
+        evaluation={makeGameweekEvaluation({ status: 'not_completed' })}
+        {...idle}
+        latestCompleted={latestCompleted}
+        {...idleLatest}
+      />,
+    )
+
+    expect(screen.getByText('Gameweek 4')).toBeInTheDocument()
+    expect(screen.getByText('Expected points')).toBeInTheDocument()
+    expect(screen.getByText('60.50')).toBeInTheDocument()
+    expect(screen.getByText('55')).toBeInTheDocument()
+    expect(screen.getByText('-5.50')).toBeInTheDocument()
+  })
+
+  it('shows a truthful empty state when no historical evaluation exists yet', () => {
+    render(
+      <Evaluation
+        evaluation={makeGameweekEvaluation({ status: 'not_completed' })}
+        {...idle}
+        latestCompleted={makeLatestCompletedEvaluation({ available: false, evaluation: null })}
+        {...idleLatest}
+      />,
+    )
+
+    expect(
+      screen.getByText(/historical evaluation will appear after the first completed decision cycle/i),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Gameweek 3')).not.toBeInTheDocument()
+  })
+
+  it('never renders a gameweek label or numbers for the empty historical state', () => {
+    render(
+      <Evaluation
+        evaluation={makeGameweekEvaluation({ status: 'not_completed' })}
+        {...idle}
+        latestCompleted={makeLatestCompletedEvaluation({ available: false, evaluation: null })}
+        {...idleLatest}
+      />,
+    )
+
+    expect(screen.queryByText('Expected points')).not.toBeInTheDocument()
+    expect(screen.queryAllByRole('heading', { name: 'Captain' })).toHaveLength(0)
+  })
+
+  it('shows a quiet checking state for the latest completed evaluation while it loads', () => {
+    render(
+      <Evaluation
+        evaluation={makeEvaluatedGameweek()}
+        {...idle}
+        latestCompleted={undefined}
+        latestCompletedFetching
+        latestCompletedError={null}
+      />,
+    )
+
+    expect(screen.getByRole('heading', { name: 'Latest Completed Evaluation' })).toBeInTheDocument()
+    expect(screen.getByText(/checking results/i)).toBeInTheDocument()
+  })
+
+  it('shows the error message honestly when the latest completed evaluation request fails', () => {
+    render(
+      <Evaluation
+        evaluation={makeEvaluatedGameweek()}
+        {...idle}
+        latestCompleted={undefined}
+        latestCompletedFetching={false}
+        latestCompletedError={new Error('Could not reach the decision API.')}
+      />,
+    )
+
+    expect(screen.getByText(/could not reach the decision api/i)).toBeInTheDocument()
+  })
+
+  it('omits the latest completed evaluation subsection entirely when the caller does not wire it up', () => {
+    render(<Evaluation evaluation={makeEvaluatedGameweek()} {...idle} />)
+
+    expect(
+      screen.queryByRole('heading', { name: 'Latest Completed Evaluation' }),
+    ).not.toBeInTheDocument()
   })
 })

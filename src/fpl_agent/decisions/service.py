@@ -153,6 +153,61 @@ class FPLDecisionService:
 
         return build_gameweek_evaluation(snapshot, outcomes)
 
+    async def evaluate_latest_completed_gameweek(
+        self,
+        entry_id: int,
+    ) -> GameweekEvaluation | None:
+        """Evaluate the most recent completed gameweek with a recorded snapshot.
+
+        Lets the dashboard showcase evaluation even while the current
+        gameweek is still `not_completed`, without ever fabricating a
+        result: this looks only at gameweeks strictly before the current
+        (or next, if none is current) one, and only at those with both a
+        recorded snapshot and finished results. It reuses the exact same
+        snapshot -> actual outcomes -> build_gameweek_evaluation pipeline
+        as evaluate_gameweek; only the choice of gameweek differs.
+
+        Returns None - never a placeholder - when no such gameweek
+        exists yet, e.g. before the first completed decision cycle.
+        """
+        bootstrap = await self.client.get_bootstrap_static()
+
+        try:
+            reference_gameweek: int | None = self._resolve_gameweek(
+                bootstrap.events,
+                None,
+            )
+        except ValueError:
+            # No current or next gameweek is known (e.g. between
+            # seasons) - fall back to considering every finished
+            # gameweek rather than refusing to show any history.
+            reference_gameweek = None
+
+        finished_gameweeks = {event.id for event in bootstrap.events if event.finished}
+
+        candidate_gameweek = next(
+            (
+                gw
+                for gw in self.snapshot_store.list_snapshot_gameweeks(entry_id)
+                if gw in finished_gameweeks
+                and (reference_gameweek is None or gw < reference_gameweek)
+            ),
+            None,
+        )
+
+        if candidate_gameweek is None:
+            return None
+
+        snapshot = self.snapshot_store.get_snapshot(entry_id, candidate_gameweek)
+
+        if snapshot is None:
+            return None
+
+        live = await self.client.get_event_live(candidate_gameweek)
+        outcomes = index_actual_outcomes(build_actual_outcomes(candidate_gameweek, live))
+
+        return build_gameweek_evaluation(snapshot, outcomes)
+
     @staticmethod
     def _is_gameweek_finished(events: list[Gameweek], gameweek: int) -> bool:
         """Return whether the given gameweek has finished, per bootstrap data."""

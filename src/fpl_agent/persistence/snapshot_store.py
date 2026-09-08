@@ -184,3 +184,19 @@ class SnapshotStore:
         row = cursor.fetchone()
 
         return _deserialize(row[0]) if row is not None else None
+
+    def list_snapshot_gameweeks(self, entry_id: int) -> list[int]:
+        """Return every gameweek with a recorded snapshot for this entry.
+
+        Newest first, so callers looking for the latest evaluable
+        gameweek (see FPLDecisionService.evaluate_latest_completed_gameweek)
+        can take the first one that also satisfies their own criteria
+        (e.g. "finished") without loading every snapshot's full payload.
+        """
+        cursor = self._connection.execute(
+            "SELECT gameweek FROM decision_snapshots WHERE entry_id = ? "
+            "ORDER BY gameweek DESC",
+            (entry_id,),
+        )
+
+        return [row[0] for row in cursor.fetchall()]

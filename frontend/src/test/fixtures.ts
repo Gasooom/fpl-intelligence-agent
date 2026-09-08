@@ -4,6 +4,7 @@ import type {
   EvidenceBasisResponse,
   GameweekDecisionResponse,
   GameweekEvaluationResponse,
+  LatestCompletedEvaluationResponse,
   PlayerDecisionResponse,
   PlayerEvaluationResponse,
   SellCandidateResponse,
@@ -312,6 +313,29 @@ export function makeSquadPlayerEvaluations(): {
         actual_points: 1,
       }),
     ),
+  }
+}
+
+/** Defaults to an available, fully-evaluated historical gameweek -
+ * override `available: false, evaluation: null` for the honest empty
+ * state a caller sees before the first completed decision cycle. */
+export function makeLatestCompletedEvaluation(
+  overrides: Partial<LatestCompletedEvaluationResponse> = {},
+): LatestCompletedEvaluationResponse {
+  return {
+    available: true,
+    evaluation: makeGameweekEvaluation({
+      gameweek: 3,
+      status: 'evaluated',
+      message: 'Evaluated against actual gameweek 3 results.',
+      decision_generated_at: '2026-08-03T09:00:00+00:00',
+      captain: makeCaptainEvaluation(),
+      starting_xi: makeStartingXIEvaluation(),
+      best_transfer: makeTransferEvaluation(),
+      starting_xi_players: [makePlayerEvaluation()],
+      bench_players: [makePlayerEvaluation({ player_id: 12, web_name: 'Bench Player' })],
+    }),
+    ...overrides,
   }
 }
 

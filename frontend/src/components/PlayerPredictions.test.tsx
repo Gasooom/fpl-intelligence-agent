@@ -125,4 +125,31 @@ describe('PlayerPredictions', () => {
 
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('labels the gameweek these rows belong to', () => {
+    const { startingXi, bench } = makeSquadPlayerEvaluations()
+
+    render(
+      <PlayerPredictions startingXiPlayers={startingXi} benchPlayers={bench} gameweek={3} />,
+    )
+
+    expect(screen.getByText('Gameweek 3')).toBeInTheDocument()
+  })
+
+  it('omits the gameweek label when no gameweek was supplied', () => {
+    const { startingXi, bench } = makeSquadPlayerEvaluations()
+
+    render(<PlayerPredictions startingXiPlayers={startingXi} benchPlayers={bench} />)
+
+    expect(screen.queryByText(/^gameweek /i)).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /player predictions/i })).toBeInTheDocument()
+  })
+
+  it('renders nothing even with a gameweek when there are no player rows', () => {
+    const { container } = render(
+      <PlayerPredictions startingXiPlayers={[]} benchPlayers={[]} gameweek={3} />,
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
 })

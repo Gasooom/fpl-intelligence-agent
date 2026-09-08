@@ -2,6 +2,7 @@ import type {
   ApiErrorBody,
   GameweekDecisionResponse,
   GameweekEvaluationResponse,
+  LatestCompletedEvaluationResponse,
 } from './types'
 
 // Empty by default so requests are relative and pick up the Vite dev
@@ -114,4 +115,20 @@ export async function getGameweekEvaluation(
   gameweek: number,
 ): Promise<GameweekEvaluationResponse> {
   return getJson<GameweekEvaluationResponse>(`/api/v1/evaluation/${entryId}`, gameweek)
+}
+
+/**
+ * Fetch the evaluation of the most recent completed gameweek that has a
+ * recorded decision snapshot - independent of whichever gameweek the
+ * decision above currently resolves to. Lets the dashboard showcase
+ * real evaluation history while the current gameweek is still
+ * `not_completed`, without the frontend deciding which gameweek that is
+ * itself.
+ */
+export async function getLatestCompletedEvaluation(
+  entryId: number,
+): Promise<LatestCompletedEvaluationResponse> {
+  return getJson<LatestCompletedEvaluationResponse>(
+    `/api/v1/evaluation/${entryId}/latest-completed`,
+  )
 }
