@@ -1,6 +1,7 @@
 import type {
   BuyCandidateResponse,
   CaptainEvaluationResponse,
+  EvidenceBasisResponse,
   GameweekDecisionResponse,
   GameweekEvaluationResponse,
   PlayerDecisionResponse,
@@ -110,6 +111,28 @@ export function makeTransferPair(
   }
 }
 
+/** Defaults to a strong-evidence basis that is internally consistent
+ * with makeGameweekDecision's default confidence of "High": a full
+ * sample for all eleven starters. Tests exercising a limited-evidence
+ * decision override both `confidence` and this together, exactly as
+ * the backend always sends them. */
+export function makeEvidenceBasis(
+  overrides: Partial<EvidenceBasisResponse> = {},
+): EvidenceBasisResponse {
+  return {
+    level: 'High',
+    average_sample_confidence: 1.0,
+    medium_threshold: 0.5,
+    high_threshold: 0.75,
+    players_considered: 11,
+    limited_sample_players: 0,
+    partial_sample_players: 0,
+    full_sample_players: 11,
+    limited_sample_minutes: 450,
+    ...overrides,
+  }
+}
+
 export function makeGameweekDecision(
   overrides: Partial<GameweekDecisionResponse> = {},
 ): GameweekDecisionResponse {
@@ -165,6 +188,7 @@ export function makeGameweekDecision(
     starting_xi_expected_points: 66.0,
     projected_gameweek_points: 72.0,
     confidence: 'High',
+    evidence_basis: makeEvidenceBasis(),
     decision_summary: 'Captain: Captain Player (9.0 expected points). Decision confidence: High.',
     evidence: [
       { player_id: 11, decision: 'captain', score: 9.0, reasons: ['Highest captaincy score'] },

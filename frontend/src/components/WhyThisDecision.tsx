@@ -101,7 +101,7 @@ export function WhyThisDecision({ bestTransfer }: WhyThisDecisionProps) {
       )}
 
       {reasons.length > 0 && (
-        <CollapsibleSection summary="Backend reasoning">
+        <CollapsibleSection summary="Full reasoning">
           <ul className="list-inside list-disc space-y-1 text-sm text-text-secondary">
             {reasons.map((reason) => (
               <li key={reason}>{reason}</li>

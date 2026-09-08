@@ -50,7 +50,7 @@ describe('WhyThisDecision', () => {
 
     render(<WhyThisDecision bestTransfer={pair} />)
 
-    expect(screen.getByText('Backend reasoning')).toBeInTheDocument()
+    expect(screen.getByText('Full reasoning')).toBeInTheDocument()
     // Every reason in the array must render, not just the first one -
     // a `.slice`/key-collision bug would silently drop the rest.
     expect(screen.getByText('Higher expected points (9.73 vs 1.71)')).toBeInTheDocument()
@@ -75,7 +75,7 @@ describe('WhyThisDecision', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('filters blank reason strings from Backend reasoning rather than rendering empty bullets', () => {
+  it('filters blank reason strings from Full reasoning rather than rendering empty bullets', () => {
     const pair = makeTransferPair({
       reasons: ['Better points-per-price value', '', '   ', 'Stronger minutes confidence'],
     })
@@ -87,7 +87,7 @@ describe('WhyThisDecision', () => {
     expect(document.querySelectorAll('li').length).toBe(2)
   })
 
-  it('hides Backend reasoning entirely (never an empty list) when every reason is blank but comparison rows still exist', () => {
+  it('hides Full reasoning entirely (never an empty list) when every reason is blank but comparison rows still exist', () => {
     const pair = makeTransferPair({
       sell: makeSellCandidate({ expected_points: 1.71 }),
       buy: makeBuyCandidate({ expected_points: 9.73 }),
@@ -97,6 +97,6 @@ describe('WhyThisDecision', () => {
     render(<WhyThisDecision bestTransfer={pair} />)
 
     expect(screen.getByText('Higher expected points')).toBeInTheDocument()
-    expect(screen.queryByText('Backend reasoning')).not.toBeInTheDocument()
+    expect(screen.queryByText('Full reasoning')).not.toBeInTheDocument()
   })
 })

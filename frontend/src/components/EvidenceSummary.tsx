@@ -101,7 +101,7 @@ export function EvidenceSummary({
 
       {evidence.length === 0 ? (
         <p className="mt-4 text-sm text-text-muted">
-          No evidence entries were returned for this decision.
+          No supporting evidence is available for this decision.
         </p>
       ) : (
         <>

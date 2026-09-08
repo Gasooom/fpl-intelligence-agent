@@ -126,3 +126,34 @@ export function nonEmptyReasons(reasons: (string | null | undefined)[] | null | 
  * is genuinely empty after filtering - an honest statement, never an
  * invented explanation. */
 export const NO_REASONS_FALLBACK = 'No additional reasoning available.'
+
+/**
+ * The backend's confidence label -> the word shown to a reader.
+ *
+ * "Low"/"Medium"/"High" describe how much evidence backs a decision,
+ * but read as a verdict on the recommendation itself - "Low
+ * confidence" sounds like a weak call when it actually means a thin
+ * playing-time sample. "Limited"/"Moderate"/"Strong" describe the
+ * evidence, which is what the value has always measured.
+ *
+ * Presentation only: the API value is untouched, and an unrecognized
+ * label passes through rather than being guessed at.
+ */
+export function evidenceStrengthLabel(confidence: string): string {
+  switch (confidence.toLowerCase()) {
+    case 'low':
+      return 'Limited'
+    case 'medium':
+      return 'Moderate'
+    case 'high':
+      return 'Strong'
+    default:
+      return confidence
+  }
+}
+
+/** Whole percent for a 0-1 threshold, matching formatConfidence's
+ * treatment of the scores those thresholds are compared against. */
+export function formatThreshold(value: number): string {
+  return `${Math.round(value * 100)}%`
+}

@@ -144,7 +144,10 @@ describe('App', () => {
     expect(screen.getByText('Gameweek 5')).toBeInTheDocument()
     expect(screen.getAllByText('Captain Player').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Vice Player').length).toBeGreaterThan(0)
-    expect(screen.getByText('High')).toBeInTheDocument() // confidence, default fixture
+    // The default fixture's "High" confidence, shown as evidence
+    // wording rather than as a confidence verdict.
+    expect(screen.getByText('Strong')).toBeInTheDocument()
+    expect(screen.queryByText('High')).not.toBeInTheDocument()
   })
 
   it('renders the Starting XI and Bench counts', async () => {
@@ -261,9 +264,12 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', { name: /decision evaluation/i }),
     ).toBeInTheDocument()
-    expect(screen.getByText('12 actual points')).toBeInTheDocument()
     expect(screen.getByText('Correct')).toBeInTheDocument()
-    expect(screen.getByText('Positive')).toBeInTheDocument()
+    expect(screen.getByText(/outcome: positive/i)).toBeInTheDocument()
+    // Expected, actual, and error each carry their own label.
+    expect(screen.getByText('Expected points')).toBeInTheDocument()
+    expect(screen.getAllByText('Actual points').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Prediction error').length).toBeGreaterThan(0)
   })
 
   it('renders the full squad player predictions when a gameweek has been evaluated', async () => {
@@ -301,8 +307,12 @@ describe('App', () => {
     await submitEntryForm('8731757')
 
     await screen.findByRole('heading', { name: /decision evaluation/i })
-    expect(screen.getByText('10.31 expected points')).toBeInTheDocument()
-    expect(screen.getByText('12 actual points')).toBeInTheDocument()
+    expect(screen.getByText(/projected 10\.31 points/i)).toBeInTheDocument()
+    // "12" also appears in the per-player predictions table below, so
+    // this asserts the figure in the evaluation triad specifically.
+    expect(
+      screen.getAllByText('12').some((element) => element.tagName === 'DD'),
+    ).toBe(true)
   })
 
   it('renders Other transfer options for transfer_recommendations beyond best_transfer, in backend order', async () => {

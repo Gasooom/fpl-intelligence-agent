@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fpl_agent.analysis.sell_scoring import SellScore
-from fpl_agent.decisions.gameweek_decision import GameweekDecision
+from fpl_agent.decisions.gameweek_decision import GameweekDecision, build_evidence_basis
 from fpl_agent.decisions.snapshot import SnapshotPlayer, SnapshotTransfer, build_decision_snapshot
 from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
 from fpl_agent.decisions.transfer_analysis import BuyCandidate, SellCandidate, TransferPair
@@ -120,6 +120,7 @@ def make_decision(best_transfer: TransferPair | None) -> GameweekDecision:
         starting_xi_expected_points=18.56,
         projected_gameweek_points=28.87,
         confidence="Low",
+        evidence_basis=build_evidence_basis(starting_xi),
         decision_summary="...",
         evidence=[],
     )

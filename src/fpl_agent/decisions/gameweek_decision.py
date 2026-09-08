@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from fpl_agent.analysis.confidence import (
+    LIMITED_SAMPLE_MINUTES,
+    sample_confidence_level,
+)
 from fpl_agent.data.models import Fixture, Player, SquadPick, Team
 from fpl_agent.decisions.squad_analysis import (
     SquadDecision,
@@ -63,6 +67,39 @@ class RecommendationEvidence:
 
 
 @dataclass(frozen=True)
+class EvidenceBasis:
+    """The figures behind a decision's `confidence` label.
+
+    Exists so the label can be *explained* without anything downstream
+    recomputing it. Every field here is a value `build_evidence_basis`
+    actually used or counted while deciding the label - none is a new
+    measure, and none affects any recommendation.
+
+    `level` repeats the resulting label so a consumer holding only this
+    object still knows which outcome the figures produced.
+    `average_sample_confidence` is the mean starting-XI
+    `sample_confidence` (0.0-1.0) that was compared against
+    `medium_threshold` / `high_threshold`. The three band counts
+    partition `players_considered` by each starter's own sample level,
+    and `limited_sample_minutes` is the observed-minutes figure below
+    which a player falls into the limited band.
+    """
+
+    level: str
+
+    average_sample_confidence: float
+    medium_threshold: float
+    high_threshold: float
+
+    players_considered: int
+    limited_sample_players: int
+    partial_sample_players: int
+    full_sample_players: int
+
+    limited_sample_minutes: int
+
+
+@dataclass(frozen=True)
 class GameweekDecision:
     """The unified deterministic gameweek action plan.
 
@@ -109,12 +146,19 @@ class GameweekDecision:
     projected_gameweek_points: float
 
     confidence: str
+    # The figures `confidence` was derived from, so the label can be
+    # explained downstream without recomputing it. Never used as an
+    # input to any recommendation.
+    evidence_basis: EvidenceBasis
     decision_summary: str
     evidence: list[RecommendationEvidence]
 
 
-def _aggregate_confidence(starting_xi: list[SquadPlayerAnalysis]) -> str:
-    """Aggregate starting-XI sample confidence into one deterministic label.
+def build_evidence_basis(
+    starting_xi: list[SquadPlayerAnalysis],
+) -> EvidenceBasis:
+    """Aggregate starting-XI sample confidence into one deterministic label,
+    together with the figures that label was derived from.
 
     This reflects only the strength of the playing-time evidence behind
     the starting XI's projections (average `sample_confidence`) - never
@@ -129,21 +173,58 @@ def _aggregate_confidence(starting_xi: list[SquadPlayerAnalysis]) -> str:
     Low: everything else - deliberately the conservative default,
     including early-season gameweeks where little playing-time evidence
     exists yet for anyone.
+
+    The band counts and thresholds returned alongside `level` are the
+    *same* numbers this function compared, not a second derivation of
+    them: a consumer explaining why the label came out Low is therefore
+    quoting the calculation rather than reconstructing it, and the two
+    can never disagree. An empty starting XI yields the conservative
+    "Low" with a zero average and zero counts - there is genuinely no
+    evidence in that case, and it is reported as exactly that.
     """
-    if not starting_xi:
-        return "Low"
+    considered = len(starting_xi)
 
-    avg_confidence = sum(
-        player.sample_confidence for player in starting_xi
-    ) / len(starting_xi)
+    average = (
+        sum(player.sample_confidence for player in starting_xi) / considered
+        if considered
+        else 0.0
+    )
 
-    if avg_confidence >= _HIGH_CONFIDENCE_SAMPLE:
-        return "High"
+    levels = [
+        sample_confidence_level(player.sample_confidence)
+        for player in starting_xi
+    ]
 
-    if avg_confidence >= _MEDIUM_CONFIDENCE_SAMPLE:
-        return "Medium"
+    if average >= _HIGH_CONFIDENCE_SAMPLE:
+        level = "High"
+    elif average >= _MEDIUM_CONFIDENCE_SAMPLE:
+        level = "Medium"
+    else:
+        level = "Low"
 
-    return "Low"
+    return EvidenceBasis(
+        level=level,
+        # Rounded only for transport; the comparisons above used the
+        # full-precision average, so the label is never affected.
+        average_sample_confidence=round(average, 4),
+        medium_threshold=_MEDIUM_CONFIDENCE_SAMPLE,
+        high_threshold=_HIGH_CONFIDENCE_SAMPLE,
+        players_considered=considered,
+        limited_sample_players=levels.count("low"),
+        partial_sample_players=levels.count("medium"),
+        full_sample_players=levels.count("high"),
+        limited_sample_minutes=LIMITED_SAMPLE_MINUTES,
+    )
+
+
+def _aggregate_confidence(starting_xi: list[SquadPlayerAnalysis]) -> str:
+    """The starting XI's confidence label on its own.
+
+    Retained as the narrow entry point for callers that only need the
+    label; it delegates to `build_evidence_basis` so there is exactly
+    one implementation of the aggregation.
+    """
+    return build_evidence_basis(starting_xi).level
 
 
 def _captain_reasons(player: SquadPlayerAnalysis) -> list[str]:
@@ -377,7 +458,8 @@ def build_gameweek_decision(
 
     best_transfer = select_best_transfer(transfer_pairs)
 
-    confidence = _aggregate_confidence(squad_decision.starting_xi)
+    evidence_basis = build_evidence_basis(squad_decision.starting_xi)
+    confidence = evidence_basis.level
 
     evidence = _build_evidence(squad_decision, transfer_pairs)
 
@@ -421,6 +503,7 @@ def build_gameweek_decision(
         starting_xi_expected_points=starting_xi_expected_points,
         projected_gameweek_points=projected_gameweek_points,
         confidence=confidence,
+        evidence_basis=evidence_basis,
         decision_summary=decision_summary,
         evidence=evidence,
     )

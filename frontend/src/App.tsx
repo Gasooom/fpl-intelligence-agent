@@ -72,6 +72,8 @@ function App() {
               viceCaptain={decision.vice_captain}
               bestTransfer={decision.best_transfer}
               confidence={decision.confidence}
+              evidenceBasis={decision.evidence_basis}
+              projectedGameweekPoints={decision.projected_gameweek_points}
               summary={decision.decision_summary}
               freeTransfersAvailable={decision.free_transfers_available}
               inTheBank={decision.in_the_bank}

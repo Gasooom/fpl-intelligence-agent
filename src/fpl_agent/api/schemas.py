@@ -155,6 +155,41 @@ class EvidenceResponse(BaseModel):
     reasons: list[str]
 
 
+class EvidenceBasisResponse(BaseModel):
+    """The figures behind `GameweekDecisionResponse.confidence`.
+
+    Purely explanatory: every value here was already used by the
+    deterministic engine to pick the confidence label, and none of them
+    feeds any recommendation. Exposed so a client can say *why* the
+    label came out the way it did without re-deriving it - the starting
+    XI's per-player `sample_confidence` is deliberately not part of
+    `PlayerDecisionResponse`, so without this there is no honest way to
+    explain a "Low" label client-side.
+
+    `level` repeats `confidence` so this object is self-describing.
+    `average_sample_confidence` (0.0-1.0) is the mean starting-XI
+    sample confidence that was compared against `medium_threshold` and
+    `high_threshold`. The three band counts partition
+    `players_considered`, and `limited_sample_minutes` is the
+    observed-minutes figure below which a player counts as limited.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    level: str
+
+    average_sample_confidence: float
+    medium_threshold: float
+    high_threshold: float
+
+    players_considered: int
+    limited_sample_players: int
+    partial_sample_players: int
+    full_sample_players: int
+
+    limited_sample_minutes: int
+
+
 class GameweekDecisionResponse(BaseModel):
     """The unified deterministic gameweek action plan."""
 
@@ -202,5 +237,8 @@ class GameweekDecisionResponse(BaseModel):
     projected_gameweek_points: float
 
     confidence: str
+    # What `confidence` was derived from. Additive and explanatory
+    # only - it changes no existing field's meaning.
+    evidence_basis: EvidenceBasisResponse
     decision_summary: str
     evidence: list[EvidenceResponse]

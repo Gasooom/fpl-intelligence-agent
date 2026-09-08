@@ -202,6 +202,6 @@ describe('EvidenceSummary', () => {
       />,
     )
 
-    expect(screen.getByText(/no evidence entries were returned/i)).toBeInTheDocument()
+    expect(screen.getByText(/no supporting evidence is available/i)).toBeInTheDocument()
   })
 })

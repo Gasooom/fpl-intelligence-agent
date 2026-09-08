@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fpl_agent.analysis.confidence import LIMITED_SAMPLE_MINUTES
 from fpl_agent.analysis.sell_scoring import SellScore
 from fpl_agent.data.models import Fixture, Player, Team
 from fpl_agent.decisions.gameweek_decision import (
@@ -8,6 +9,7 @@ from fpl_agent.decisions.gameweek_decision import (
     GameweekDecision,
     RecommendationEvidence,
     _aggregate_confidence,
+    build_evidence_basis,
     build_gameweek_decision,
     select_best_transfer,
 )
@@ -601,3 +603,123 @@ def test_aggregate_confidence_boundary_values() -> None:
 
 def test_aggregate_confidence_is_low_for_an_empty_starting_xi() -> None:
     assert _aggregate_confidence([]) == "Low"
+
+
+# --- Evidence basis: the figures behind the confidence label ---
+#
+# These exist so the label can be explained truthfully downstream. The
+# contract they protect is that the basis *is* the calculation, not a
+# parallel description of it that could drift away from the label.
+
+
+def test_evidence_basis_level_always_matches_the_confidence_label() -> None:
+    """The basis explains the label, so it must never disagree with it."""
+    for sample_confidence in (0.0, 0.25, 0.49, 0.5, 0.74, 0.75, 1.0):
+        starting_xi = [
+            _squad_player_analysis(player_id=i, sample_confidence=sample_confidence)
+            for i in range(11)
+        ]
+
+        basis = build_evidence_basis(starting_xi)
+
+        assert basis.level == _aggregate_confidence(starting_xi)
+
+
+def test_evidence_basis_reports_the_average_it_actually_compared() -> None:
+    starting_xi = [
+        _squad_player_analysis(player_id=0, sample_confidence=0.25),
+        _squad_player_analysis(player_id=1, sample_confidence=0.75),
+    ]
+
+    basis = build_evidence_basis(starting_xi)
+
+    assert basis.average_sample_confidence == 0.5
+    assert basis.level == "Medium"
+
+
+def test_evidence_basis_band_counts_partition_the_starting_xi() -> None:
+    """Every starter lands in exactly one band, so the three counts add
+    up to players_considered - a UI can quote them as "N of M" safely."""
+    starting_xi = [
+        _squad_player_analysis(player_id=0, sample_confidence=0.0),
+        _squad_player_analysis(player_id=1, sample_confidence=0.25),
+        _squad_player_analysis(player_id=2, sample_confidence=0.5),
+        _squad_player_analysis(player_id=3, sample_confidence=0.75),
+        _squad_player_analysis(player_id=4, sample_confidence=1.0),
+    ]
+
+    basis = build_evidence_basis(starting_xi)
+
+    assert basis.players_considered == 5
+    assert basis.limited_sample_players == 2
+    assert basis.partial_sample_players == 1
+    assert basis.full_sample_players == 2
+    assert (
+        basis.limited_sample_players
+        + basis.partial_sample_players
+        + basis.full_sample_players
+        == basis.players_considered
+    )
+
+
+def test_evidence_basis_exposes_the_thresholds_that_decided_the_label() -> None:
+    starting_xi = [
+        _squad_player_analysis(player_id=i, sample_confidence=0.25)
+        for i in range(11)
+    ]
+
+    basis = build_evidence_basis(starting_xi)
+
+    assert basis.medium_threshold == 0.5
+    assert basis.high_threshold == 0.75
+    assert basis.average_sample_confidence < basis.medium_threshold
+    assert basis.limited_sample_minutes == LIMITED_SAMPLE_MINUTES
+
+
+def test_evidence_basis_is_not_affected_by_risk() -> None:
+    """Same separation the confidence label itself enforces: the basis
+    describes evidence only, so high risk must not change any figure."""
+    low_risk = [
+        _squad_player_analysis(player_id=i, sample_confidence=1.0, overall_risk=0.05)
+        for i in range(11)
+    ]
+    high_risk = [
+        _squad_player_analysis(player_id=i, sample_confidence=1.0, overall_risk=0.95)
+        for i in range(11)
+    ]
+
+    assert build_evidence_basis(low_risk) == build_evidence_basis(high_risk)
+
+
+def test_evidence_basis_for_an_empty_starting_xi_reports_no_evidence() -> None:
+    """Conservative Low with genuinely zero counts - never a fabricated
+    average that would imply evidence exists."""
+    basis = build_evidence_basis([])
+
+    assert basis.level == "Low"
+    assert basis.average_sample_confidence == 0.0
+    assert basis.players_considered == 0
+    assert basis.limited_sample_players == 0
+    assert basis.partial_sample_players == 0
+    assert basis.full_sample_players == 0
+
+
+def test_built_decision_carries_a_basis_consistent_with_its_confidence() -> None:
+    """End-to-end: the decision the engine actually produces exposes a
+    basis describing that decision's own starting XI, and its level is
+    the confidence label the decision reports."""
+    players = [*_squad_players(), *_pool_players()]
+
+    decision = build_gameweek_decision(
+        players=players,
+        teams=_teams(),
+        fixtures=_fixtures(),
+        picks=list(range(1, 16)),
+        gameweek=5,
+    )
+
+    basis = decision.evidence_basis
+
+    assert basis.level == decision.confidence
+    assert basis.players_considered == len(decision.starting_xi)
+    assert basis == build_evidence_basis(decision.starting_xi)

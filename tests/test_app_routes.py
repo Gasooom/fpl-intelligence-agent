@@ -16,7 +16,11 @@ from fpl_agent.data.errors import (
     FPLUpstreamError,
     FPLUpstreamTimeoutError,
 )
-from fpl_agent.decisions.gameweek_decision import GameweekDecision, RecommendationEvidence
+from fpl_agent.decisions.gameweek_decision import (
+    GameweekDecision,
+    RecommendationEvidence,
+    build_evidence_basis,
+)
 from fpl_agent.decisions.service import FPLDecisionService
 from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
 from fpl_agent.decisions.transfer_analysis import (
@@ -192,6 +196,10 @@ def make_gameweek_decision(
         starting_xi_expected_points=starting_xi_expected_points,
         projected_gameweek_points=round(starting_xi_expected_points + captain.expected_points, 2),
         confidence="High",
+        # Built by the real aggregation from this same starting XI, so
+        # the fixture can never describe a basis the engine would not
+        # have produced.
+        evidence_basis=build_evidence_basis(starting_xi),
         decision_summary="Captain: Player 11 (6.0 expected points). Decision confidence: High.",
         evidence=evidence or [],
     )
@@ -439,6 +447,7 @@ def test_response_matches_deterministic_schema_and_hides_internal_fields(
         "starting_xi_expected_points",
         "projected_gameweek_points",
         "confidence",
+        "evidence_basis",
         "decision_summary",
         "evidence",
     }
@@ -683,3 +692,53 @@ def test_unexpected_application_error_still_returns_http_500() -> None:
     app.dependency_overrides.clear()
 
     assert response.status_code == 500
+
+
+def test_decision_response_exposes_the_basis_behind_its_confidence(
+    client: TestClient,
+) -> None:
+    """The confidence label is only explainable client-side if the
+    figures behind it travel with it - the starting XI's per-player
+    sample_confidence is deliberately not exposed, so this object is
+    the only honest source for that explanation."""
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    payload = client.get("/api/v1/decision/8731757").json()
+    basis = payload["evidence_basis"]
+
+    assert set(basis.keys()) == {
+        "level",
+        "average_sample_confidence",
+        "medium_threshold",
+        "high_threshold",
+        "players_considered",
+        "limited_sample_players",
+        "partial_sample_players",
+        "full_sample_players",
+        "limited_sample_minutes",
+    }
+
+    # The basis describes the very label shipped alongside it.
+    assert basis["level"] == payload["confidence"]
+    assert basis["players_considered"] == len(payload["starting_xi"])
+    assert (
+        basis["limited_sample_players"]
+        + basis["partial_sample_players"]
+        + basis["full_sample_players"]
+        == basis["players_considered"]
+    )
+
+
+def test_evidence_basis_does_not_leak_per_player_sample_confidence(
+    client: TestClient,
+) -> None:
+    """Adding the basis must not widen the squad-player contract: sample
+    confidence stays an aggregate, never a per-starter figure."""
+    fake_service = FakeDecisionService(decision=make_gameweek_decision())
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    payload = client.get("/api/v1/decision/8731757").json()
+
+    for player in payload["starting_xi"]:
+        assert "sample_confidence" not in player

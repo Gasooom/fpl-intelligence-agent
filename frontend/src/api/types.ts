@@ -124,6 +124,35 @@ export interface EvidenceResponse {
   reasons: string[]
 }
 
+/** The figures the backend derived `confidence` from.
+ *
+ * Purely explanatory - none of it feeds a recommendation. It exists so
+ * the confidence label can be explained without the browser inferring
+ * anything: the starting XI's per-player sample confidence is
+ * deliberately absent from PlayerDecisionResponse, so this object is
+ * the only honest basis for that explanation.
+ *
+ * `level` repeats `confidence`. `average_sample_confidence` (0-1) is
+ * the value the backend compared against `medium_threshold` and
+ * `high_threshold`. The three band counts partition
+ * `players_considered`, and `limited_sample_minutes` is the
+ * observed-minutes figure below which a player counts as limited.
+ * Never recompute the label from these - render them as facts. */
+export interface EvidenceBasisResponse {
+  level: string
+
+  average_sample_confidence: number
+  medium_threshold: number
+  high_threshold: number
+
+  players_considered: number
+  limited_sample_players: number
+  partial_sample_players: number
+  full_sample_players: number
+
+  limited_sample_minutes: number
+}
+
 /** The unified deterministic gameweek action plan returned by
  * GET /api/v1/decision/{entry_id}?gameweek={gameweek}. */
 export interface GameweekDecisionResponse {
@@ -159,6 +188,7 @@ export interface GameweekDecisionResponse {
   projected_gameweek_points: number
 
   confidence: string
+  evidence_basis: EvidenceBasisResponse
   decision_summary: string
   evidence: EvidenceResponse[]
 }

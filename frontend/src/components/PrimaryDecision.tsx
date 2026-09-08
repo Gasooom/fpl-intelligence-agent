@@ -1,5 +1,10 @@
-import type { PlayerDecisionResponse, TransferRecommendationResponse } from '../api/types'
-import { formatPrice, formatSigned } from '../lib/format'
+import type {
+  EvidenceBasisResponse,
+  PlayerDecisionResponse,
+  TransferRecommendationResponse,
+} from '../api/types'
+import { formatPoints, formatPrice, formatSigned } from '../lib/format'
+import { EvidenceStrength } from './EvidenceStrength'
 
 interface PrimaryDecisionProps {
   gameweek: number
@@ -7,6 +12,8 @@ interface PrimaryDecisionProps {
   viceCaptain: PlayerDecisionResponse
   bestTransfer: TransferRecommendationResponse | null
   confidence: string
+  evidenceBasis: EvidenceBasisResponse
+  projectedGameweekPoints: number
   summary: string
   freeTransfersAvailable: number | null
   inTheBank: number | null
@@ -55,15 +62,17 @@ function TransferEconomics({ transfer }: { transfer: TransferRecommendationRespo
 }
 
 /**
- * The hero: the single most important thing on the page, readable in
- * a few seconds. Every value here comes straight from the API -
- * nothing computed, nothing ranked. The best transfer leads (it's the
- * one action item this gameweek), with its own priority shown
- * alongside it exactly as the backend labels it; captain, vice,
- * confidence, and the manager's transfer context follow as a compact
- * supporting line rather than a second headline. Confidence is
- * metadata, not a verdict - Low confidence is never colored like a
- * warning.
+ * The executive summary: what this gameweek's decision is, readable in
+ * a few seconds and without knowing any FPL shorthand.
+ *
+ * The headline answers the two questions a first-time reader actually
+ * has - how many points is this squad projected to score, and who is
+ * captain - in plain words, with the technical abbreviation kept as a
+ * quiet secondary marker rather than the primary label. The one action
+ * item follows, then the evidence behind it all.
+ *
+ * Every value comes straight from the API; nothing is computed,
+ * ranked, or re-totaled here.
  */
 export function PrimaryDecision({
   gameweek,
@@ -71,6 +80,8 @@ export function PrimaryDecision({
   viceCaptain,
   bestTransfer,
   confidence,
+  evidenceBasis,
+  projectedGameweekPoints,
   summary,
   freeTransfersAvailable,
   inTheBank,
@@ -80,11 +91,33 @@ export function PrimaryDecision({
       <p className="text-sm text-text-muted">Gameweek {gameweek}</p>
       <h2 className="mt-1 text-2xl font-semibold text-text">Recommended plan</h2>
 
-      <div className="mt-7">
+      <div className="mt-7 flex flex-wrap items-start gap-x-12 gap-y-6">
+        <div>
+          <p className="text-xs text-text-muted">
+            Projected points{' '}
+            <abbr
+              title="Expected points — the projected gameweek total, including the captain multiplier"
+              className="text-text-muted/80 no-underline"
+            >
+              (xP)
+            </abbr>
+          </p>
+          <p className="mt-1 text-4xl font-semibold tabular-nums text-text">
+            {formatPoints(projectedGameweekPoints)}
+          </p>
+        </div>
+
+        <div>
+          <p className="text-xs text-text-muted">Captain</p>
+          <p className="mt-1 text-2xl font-medium text-text">{captain.web_name}</p>
+        </div>
+      </div>
+
+      <div className="mt-8 border-t border-border pt-6">
         <p className="text-xs text-text-muted">Best transfer</p>
         {bestTransfer ? (
           <>
-            <p className="mt-0.5 text-3xl font-semibold text-text">
+            <p className="mt-0.5 text-2xl font-semibold text-text">
               {bestTransfer.sell.web_name} → {bestTransfer.buy.web_name}
             </p>
             <p className="mt-1.5 text-sm text-text-secondary">
@@ -95,28 +128,18 @@ export function PrimaryDecision({
         ) : (
           <p className="mt-0.5 text-lg text-text-secondary">No worthwhile transfer this gameweek</p>
         )}
+
+        {bestTransfer && <TransferEconomics transfer={bestTransfer} />}
       </div>
 
-      {bestTransfer && <TransferEconomics transfer={bestTransfer} />}
-
-      <div className="mt-6 flex flex-wrap gap-x-8 gap-y-4">
-        <div>
-          <p className="text-xs text-text-muted">Captain</p>
-          <p className="mt-0.5 text-base font-medium text-text">{captain.web_name}</p>
-        </div>
+      <div className="mt-6 flex flex-wrap gap-x-8 gap-y-4 border-t border-border pt-6">
         <div>
           <p className="text-xs text-text-muted">Vice-captain</p>
           <p className="mt-0.5 text-base font-medium text-text">{viceCaptain.web_name}</p>
         </div>
         <div>
-          <p className="text-xs text-text-muted">Confidence</p>
-          <p className="mt-0.5 text-base text-text">{confidence}</p>
-        </div>
-        <div>
           <p className="text-xs text-text-muted">Free transfers</p>
-          <p className="mt-0.5 text-base text-text">
-            {freeTransfersAvailable ?? 'Not supplied'}
-          </p>
+          <p className="mt-0.5 text-base text-text">{freeTransfersAvailable ?? 'Not supplied'}</p>
         </div>
         <div>
           <p className="text-xs text-text-muted">In the bank</p>
@@ -124,18 +147,12 @@ export function PrimaryDecision({
             {inTheBank === null ? 'Unknown' : formatPrice(inTheBank)}
           </p>
         </div>
-      </div>
 
-      {/* The backend derives this label from how much playing-time
-          evidence backs the starting XI and how much risk it carries -
-          so it is described as exactly that, and never relabeled
-          "evidence strength", which would drop the risk half of the
-          definition. Low here means thin evidence, not a weak
-          recommendation, which is why it is never styled as a warning. */}
-      <p className="mt-3 max-w-xl text-xs leading-relaxed text-text-muted">
-        Confidence describes the evidence and risk behind this plan, not how strong the
-        recommendation is.
-      </p>
+        {/* Evidence sits with the decision it qualifies, not in a
+            separate panel: it is context for reading the plan above,
+            and is never styled as a warning. */}
+        <EvidenceStrength confidence={confidence} basis={evidenceBasis} />
+      </div>
 
       <p className="mt-6 max-w-xl text-sm leading-relaxed text-text-secondary">{summary}</p>
     </div>

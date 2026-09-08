@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fpl_agent.api.schemas import (
     BuyCandidateResponse,
+    EvidenceBasisResponse,
     EvidenceResponse,
     GameweekDecisionResponse,
     PlayerDecisionResponse,
@@ -10,6 +11,7 @@ from fpl_agent.api.schemas import (
     TransferRecommendationResponse,
 )
 from fpl_agent.decisions.gameweek_decision import (
+    EvidenceBasis,
     GameweekDecision,
     RecommendationEvidence,
 )
@@ -164,6 +166,25 @@ def _evidence_to_response(
     )
 
 
+def _evidence_basis_to_response(basis: EvidenceBasis) -> EvidenceBasisResponse:
+    """Copy the confidence basis across field for field.
+
+    Nothing is recomputed, re-rounded, or re-classified here - the
+    deterministic engine already decided every one of these values.
+    """
+    return EvidenceBasisResponse(
+        level=basis.level,
+        average_sample_confidence=basis.average_sample_confidence,
+        medium_threshold=basis.medium_threshold,
+        high_threshold=basis.high_threshold,
+        players_considered=basis.players_considered,
+        limited_sample_players=basis.limited_sample_players,
+        partial_sample_players=basis.partial_sample_players,
+        full_sample_players=basis.full_sample_players,
+        limited_sample_minutes=basis.limited_sample_minutes,
+    )
+
+
 def gameweek_decision_to_response(
     decision: GameweekDecision,
 ) -> GameweekDecisionResponse:
@@ -212,6 +233,7 @@ def gameweek_decision_to_response(
         starting_xi_expected_points=decision.starting_xi_expected_points,
         projected_gameweek_points=decision.projected_gameweek_points,
         confidence=decision.confidence,
+        evidence_basis=_evidence_basis_to_response(decision.evidence_basis),
         decision_summary=decision.decision_summary,
         evidence=[
             _evidence_to_response(item)
