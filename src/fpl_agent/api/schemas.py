@@ -195,7 +195,17 @@ class GameweekDecisionResponse(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # The gameweek this plan predicts.
     gameweek: int
+    # The gameweek whose squad was optimized. Equal to `gameweek`
+    # normally; lower when predicting a gameweek the manager has not
+    # picked a squad for yet, in which case their latest available
+    # squad was used. A future gameweek's picks are never invented.
+    source_picks_gameweek: int
+    # True exactly when this is a forward-looking prediction
+    # (source_picks_gameweek is behind gameweek). Supplied so a client
+    # can label it without comparing the two fields itself.
+    is_future_gameweek: bool
     generated_at: str
     decision_engine_version: str
     data_source: str

@@ -193,6 +193,8 @@ def gameweek_decision_to_response(
 
     return GameweekDecisionResponse(
         gameweek=decision.gameweek,
+        source_picks_gameweek=decision.source_picks_gameweek,
+        is_future_gameweek=decision.is_future_gameweek,
         generated_at=decision.generated_at,
         decision_engine_version=decision.decision_engine_version,
         data_source=decision.data_source,

@@ -378,6 +378,78 @@ describe('App', () => {
   })
 
 
+  // --- Predicting an upcoming gameweek ---
+  //
+  // The manager has a squad for gameweek 3 but none for gameweek 4 yet.
+  // Selecting gameweek 4 previously failed with "squad ... was not
+  // found"; it must now return a real prediction built from the
+  // gameweek 3 squad.
+
+  function makeUpcomingDecision() {
+    return makeGameweekDecision({
+      gameweek: 4,
+      source_picks_gameweek: 3,
+      is_future_gameweek: true,
+      projected_gameweek_points: 64.5,
+    })
+  }
+
+  it('labels a predicted future gameweek as upcoming', async () => {
+    mockApi({ decision: makeUpcomingDecision() })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '4')
+
+    expect(await screen.findByText('Upcoming Gameweek')).toBeInTheDocument()
+    expect(screen.getByText('Gameweek 4')).toBeInTheDocument()
+  })
+
+  it('says which squad the upcoming gameweek was planned with', async () => {
+    mockApi({ decision: makeUpcomingDecision() })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '4')
+
+    expect(await screen.findByText(/planned with your gameweek 3 squad/i)).toBeInTheDocument()
+  })
+
+  it('renders the projected XI and projected points for a future gameweek', async () => {
+    mockApi({ decision: makeUpcomingDecision() })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '4')
+
+    expect(await screen.findByText('Recommended plan')).toBeInTheDocument()
+    expect(screen.getByText('64.50')).toBeInTheDocument()
+    const xiHeading = screen.getByRole('heading', { name: /starting xi/i })
+    expect(xiHeading).toHaveTextContent('11')
+    expect(screen.getByRole('heading', { name: /^bench/i })).toHaveTextContent('4')
+    expect(screen.getAllByText('Captain Player').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Vice Player').length).toBeGreaterThan(0)
+  })
+
+  it('shows no squad-not-found error when predicting a legitimate future gameweek', async () => {
+    mockApi({ decision: makeUpcomingDecision() })
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757', '4')
+
+    await screen.findByText('Recommended plan')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(/was not found/i)).not.toBeInTheDocument()
+  })
+
+  it('does not call the current gameweek upcoming', async () => {
+    mockApi()
+    renderWithProviders(<App />)
+
+    await submitEntryForm('8731757')
+
+    await screen.findByText('Recommended plan')
+    expect(screen.queryByText('Upcoming Gameweek')).not.toBeInTheDocument()
+    expect(screen.queryByText(/planned with your/i)).not.toBeInTheDocument()
+  })
+
   // --- Production regression guards ---
   //
   // These mirror the shape of a real gameweek-2 response (an

@@ -156,7 +156,17 @@ export interface EvidenceBasisResponse {
 /** The unified deterministic gameweek action plan returned by
  * GET /api/v1/decision/{entry_id}?gameweek={gameweek}. */
 export interface GameweekDecisionResponse {
+  /** The gameweek this plan predicts. */
   gameweek: number
+  /** The gameweek whose squad was optimized. Equal to `gameweek`
+   * normally; lower when predicting a gameweek the manager has not
+   * picked a squad for yet, in which case their latest available squad
+   * was used. Future picks are never invented. */
+  source_picks_gameweek: number
+  /** True exactly when this is a forward-looking prediction. Decided by
+   * the backend - never re-derived here by comparing the two gameweek
+   * fields. */
+  is_future_gameweek: boolean
   generated_at: string
   decision_engine_version: string
   data_source: string

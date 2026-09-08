@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fpl_agent.data.client import FPLClient
-from fpl_agent.data.models import Gameweek
+from fpl_agent.data.models import Fixture, Gameweek
 from fpl_agent.decisions.evaluation import (
     GameweekEvaluation,
     build_gameweek_evaluation,
@@ -90,11 +90,21 @@ class FPLDecisionService:
             gameweek,
         )
 
+        # A future gameweek has no squad of its own yet, so the squad
+        # being planned with is the manager's latest available one. Only
+        # that gameweek's picks are ever requested - asking FPL for a
+        # future gameweek's picks answers 404, which is what the
+        # "squad ... was not found" failure was.
+        source_picks_gameweek = self._resolve_source_picks_gameweek(
+            bootstrap.events,
+            target_gameweek,
+        )
+
         entry = await self.client.get_entry(entry_id)
 
         picks_response = await self.client.get_entry_picks(
             entry_id=entry.id,
-            gameweek=target_gameweek,
+            gameweek=source_picks_gameweek,
         )
 
         fixtures = await self.client.get_fixtures()
@@ -102,9 +112,14 @@ class FPLDecisionService:
         decision = build_gameweek_decision(
             players=bootstrap.elements,
             teams=bootstrap.teams,
-            fixtures=fixtures,
+            fixtures=self._fixtures_for_projection(
+                fixtures,
+                target_gameweek=target_gameweek,
+                source_picks_gameweek=source_picks_gameweek,
+            ),
             picks=picks_response.picks,
             gameweek=target_gameweek,
+            source_picks_gameweek=source_picks_gameweek,
             entry_history=picks_response.entry_history,
             free_transfers_available=free_transfers_available,
         )
@@ -207,6 +222,67 @@ class FPLDecisionService:
         outcomes = index_actual_outcomes(build_actual_outcomes(candidate_gameweek, live))
 
         return build_gameweek_evaluation(snapshot, outcomes)
+
+    @staticmethod
+    def _resolve_source_picks_gameweek(
+        events: list[Gameweek],
+        target_gameweek: int,
+    ) -> int:
+        """Return the latest gameweek at or before the target whose squad exists.
+
+        A manager's picks only come into existence once a gameweek's
+        deadline has passed, which bootstrap reports as that gameweek
+        being finished or current. Predicting a gameweek beyond that
+        therefore plans with the squad the manager actually has now -
+        never an invented future squad, and never a picks request FPL
+        would answer 404 for.
+
+        Deliberately independent of `_resolve_gameweek`, which decides
+        *what* to predict and is unchanged: this only decides which
+        real squad that prediction is built from.
+
+        Falls back to the target gameweek when no gameweek has started
+        yet (pre-season), so the caller still gets FPL's own honest
+        "not found" for the gameweek they actually asked about rather
+        than a silently different one.
+        """
+        started = [
+            event.id
+            for event in events
+            if event.id <= target_gameweek and (event.finished or event.is_current)
+        ]
+
+        return max(started) if started else target_gameweek
+
+    @staticmethod
+    def _fixtures_for_projection(
+        fixtures: list[Fixture],
+        target_gameweek: int,
+        source_picks_gameweek: int,
+    ) -> list[Fixture]:
+        """Scope the fixture list to the gameweek actually being predicted.
+
+        Only applies to a genuine forward prediction. The projection
+        layer uses a team's *next unfinished* fixture, which for a
+        target beyond the current gameweek would otherwise be a
+        still-unplayed fixture from the gameweek in progress rather
+        than the one being predicted.
+
+        Fixtures at or after the target are kept rather than only the
+        target's own, so a team with no fixture that gameweek falls
+        back to its next real one instead of registering as "no fixture
+        found" - which the projection scale reads as the most
+        favourable fixture possible, and would overstate a player who
+        is not even playing.
+        """
+        if target_gameweek <= source_picks_gameweek:
+            return fixtures
+
+        return [
+            fixture
+            for fixture in fixtures
+            if fixture.event is None or fixture.event >= target_gameweek
+        ]
 
     @staticmethod
     def _is_gameweek_finished(events: list[Gameweek], gameweek: int) -> bool:

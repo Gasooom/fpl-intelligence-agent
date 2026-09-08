@@ -89,6 +89,8 @@ function App() {
           <Panel>
             <PrimaryDecision
               gameweek={decision.gameweek}
+              isFutureGameweek={decision.is_future_gameweek}
+              sourcePicksGameweek={decision.source_picks_gameweek}
               captain={decision.captain}
               viceCaptain={decision.vice_captain}
               bestTransfer={decision.best_transfer}

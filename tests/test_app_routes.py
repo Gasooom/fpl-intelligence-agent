@@ -169,15 +169,26 @@ def make_gameweek_decision(
     evidence: list[RecommendationEvidence] | None = None,
     free_transfers_available: int | None = None,
     in_the_bank: float | None = None,
+    source_picks_gameweek: int | None = None,
 ) -> GameweekDecision:
-    """Build a complete deterministic gameweek decision for route tests."""
+    """Build a complete deterministic gameweek decision for route tests.
+
+    `source_picks_gameweek` defaults to the target gameweek - the
+    ordinary case, where the squad being planned is the one the manager
+    already picked for it.
+    """
     starting_xi, bench = make_squad()
     pairs = transfer_recommendations or []
     captain = starting_xi[10]
     starting_xi_expected_points = round(sum(p.expected_points for p in starting_xi), 2)
+    resolved_source_gameweek = (
+        gameweek if source_picks_gameweek is None else source_picks_gameweek
+    )
 
     return GameweekDecision(
         gameweek=gameweek,
+        source_picks_gameweek=resolved_source_gameweek,
+        is_future_gameweek=resolved_source_gameweek < gameweek,
         generated_at="2026-01-01T00:00:00+00:00",
         decision_engine_version="v1",
         data_source="official-fpl-api",
@@ -429,6 +440,8 @@ def test_response_matches_deterministic_schema_and_hides_internal_fields(
 
     assert set(payload.keys()) == {
         "gameweek",
+        "source_picks_gameweek",
+        "is_future_gameweek",
         "generated_at",
         "decision_engine_version",
         "data_source",
@@ -501,6 +514,35 @@ def test_response_exposes_manager_transfer_context(client: TestClient) -> None:
 
     assert payload["free_transfers_available"] == 1
     assert payload["in_the_bank"] == 2.5
+
+
+def test_response_identifies_the_gameweek_being_predicted(client: TestClient) -> None:
+    """An ordinary decision plans the squad already picked for that
+    gameweek, so target and source are the same and nothing is
+    forward-looking."""
+    fake_service = FakeDecisionService(decision=make_gameweek_decision(gameweek=3))
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    payload = client.get("/api/v1/decision/8731757").json()
+
+    assert payload["gameweek"] == 3
+    assert payload["source_picks_gameweek"] == 3
+    assert payload["is_future_gameweek"] is False
+
+
+def test_response_distinguishes_a_predicted_upcoming_gameweek(client: TestClient) -> None:
+    """Predicting gameweek 4 from the gameweek 3 squad must say so, so a
+    client never implies the upcoming gameweek's picks already exist."""
+    fake_service = FakeDecisionService(
+        decision=make_gameweek_decision(gameweek=4, source_picks_gameweek=3),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    payload = client.get("/api/v1/decision/8731757", params={"gameweek": 4}).json()
+
+    assert payload["gameweek"] == 4
+    assert payload["source_picks_gameweek"] == 3
+    assert payload["is_future_gameweek"] is True
 
 
 def test_response_exposes_recommendation_economics(client: TestClient) -> None:

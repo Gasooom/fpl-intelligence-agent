@@ -171,6 +171,11 @@ export function makeGameweekDecision(
 
   return {
     gameweek: 5,
+    // Defaults to the ordinary case: the squad already picked for the
+    // gameweek being planned. Future-gameweek tests override both
+    // together, exactly as the backend always sends them.
+    source_picks_gameweek: 5,
+    is_future_gameweek: false,
     generated_at: '2026-01-01T00:00:00+00:00',
     decision_engine_version: 'v1',
     data_source: 'official-fpl-api',

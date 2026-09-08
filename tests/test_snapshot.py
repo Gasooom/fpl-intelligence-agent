@@ -102,6 +102,8 @@ def make_decision(best_transfer: TransferPair | None) -> GameweekDecision:
 
     return GameweekDecision(
         gameweek=3,
+        source_picks_gameweek=3,
+        is_future_gameweek=False,
         generated_at="2026-08-10T09:00:00+00:00",
         decision_engine_version="v1",
         data_source="official-fpl-api",

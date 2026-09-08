@@ -16,6 +16,10 @@ const managerContext = { freeTransfersAvailable: null, inTheBank: null }
 const baseProps = {
   evidenceBasis: makeEvidenceBasis(),
   projectedGameweekPoints: 72.0,
+  // The ordinary case: planning the squad already picked for this
+  // gameweek. Upcoming-gameweek tests override both explicitly.
+  isFutureGameweek: false,
+  sourcePicksGameweek: 5,
   ...managerContext,
 }
 
@@ -302,5 +306,84 @@ describe('PrimaryDecision', () => {
 
     expect(screen.queryByText('Transfer cost')).not.toBeInTheDocument()
     expect(screen.queryByText('Net expected value')).not.toBeInTheDocument()
+  })
+
+  // --- Predicting an upcoming gameweek ---
+
+  it('labels an upcoming gameweek as upcoming, and names the gameweek predicted', () => {
+    render(
+      <PrimaryDecision
+        {...baseProps}
+        gameweek={4}
+        isFutureGameweek
+        sourcePicksGameweek={3}
+        captain={makePlayer({ web_name: 'Cherki' })}
+        viceCaptain={makePlayer({ web_name: 'Haaland' })}
+        bestTransfer={null}
+        confidence="Low"
+        summary=""
+      />,
+    )
+
+    expect(screen.getByText('Upcoming Gameweek')).toBeInTheDocument()
+    expect(screen.getByText('Gameweek 4')).toBeInTheDocument()
+  })
+
+  it('says which squad an upcoming gameweek was planned with', () => {
+    render(
+      <PrimaryDecision
+        {...baseProps}
+        gameweek={4}
+        isFutureGameweek
+        sourcePicksGameweek={3}
+        captain={makePlayer()}
+        viceCaptain={makePlayer()}
+        bestTransfer={null}
+        confidence="Low"
+        summary=""
+      />,
+    )
+
+    expect(screen.getByText(/planned with your gameweek 3 squad/i)).toBeInTheDocument()
+  })
+
+  it('still leads with projected points and captain for an upcoming gameweek', () => {
+    render(
+      <PrimaryDecision
+        {...baseProps}
+        gameweek={4}
+        isFutureGameweek
+        sourcePicksGameweek={3}
+        projectedGameweekPoints={64.5}
+        captain={makePlayer({ web_name: 'Cherki' })}
+        viceCaptain={makePlayer({ web_name: 'Haaland' })}
+        bestTransfer={null}
+        confidence="Low"
+        summary=""
+      />,
+    )
+
+    expect(screen.getByText('64.50')).toBeInTheDocument()
+    expect(screen.getByText('Cherki')).toBeInTheDocument()
+  })
+
+  it('does not call a current gameweek upcoming, or mention a source squad', () => {
+    render(
+      <PrimaryDecision
+        {...baseProps}
+        gameweek={3}
+        isFutureGameweek={false}
+        sourcePicksGameweek={3}
+        captain={makePlayer()}
+        viceCaptain={makePlayer()}
+        bestTransfer={null}
+        confidence="Low"
+        summary=""
+      />,
+    )
+
+    expect(screen.getByText('Gameweek 3')).toBeInTheDocument()
+    expect(screen.queryByText('Upcoming Gameweek')).not.toBeInTheDocument()
+    expect(screen.queryByText(/planned with your/i)).not.toBeInTheDocument()
   })
 })

@@ -8,6 +8,11 @@ import { EvidenceStrength } from './EvidenceStrength'
 
 interface PrimaryDecisionProps {
   gameweek: number
+  /** Both supplied by the backend. When the plan looks ahead to a
+   * gameweek the manager has not picked a squad for yet, the heading
+   * says so and names the squad it was planned with. */
+  isFutureGameweek: boolean
+  sourcePicksGameweek: number
   captain: PlayerDecisionResponse
   viceCaptain: PlayerDecisionResponse
   bestTransfer: TransferRecommendationResponse | null
@@ -76,6 +81,8 @@ function TransferEconomics({ transfer }: { transfer: TransferRecommendationRespo
  */
 export function PrimaryDecision({
   gameweek,
+  isFutureGameweek,
+  sourcePicksGameweek,
   captain,
   viceCaptain,
   bestTransfer,
@@ -88,8 +95,20 @@ export function PrimaryDecision({
 }: PrimaryDecisionProps) {
   return (
     <div>
-      <p className="text-sm text-text-muted">Gameweek {gameweek}</p>
+      {isFutureGameweek ? (
+        <>
+          <p className="text-xs text-text-muted">Upcoming Gameweek</p>
+          <p className="mt-0.5 text-sm text-text-secondary">Gameweek {gameweek}</p>
+        </>
+      ) : (
+        <p className="text-sm text-text-muted">Gameweek {gameweek}</p>
+      )}
       <h2 className="mt-1 text-2xl font-semibold text-text">Recommended plan</h2>
+      {isFutureGameweek && (
+        <p className="mt-1.5 text-sm text-text-secondary">
+          Planned with your Gameweek {sourcePicksGameweek} squad.
+        </p>
+      )}
 
       <div className="mt-7 flex flex-wrap items-start gap-x-12 gap-y-6">
         <div>

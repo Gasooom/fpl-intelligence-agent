@@ -108,7 +108,20 @@ class GameweekDecision:
     No LLM is involved in producing any of these values.
     """
 
+    # The gameweek this plan predicts.
     gameweek: int
+    # The gameweek whose squad was actually optimized. Equal to
+    # `gameweek` for the normal case; lower when predicting a gameweek
+    # the manager has not picked a squad for yet, in which case their
+    # latest available squad is the one being planned with. The two are
+    # kept separate so a prediction can never imply that a future
+    # gameweek's picks already exist.
+    source_picks_gameweek: int
+    # True exactly when `source_picks_gameweek` is behind `gameweek` -
+    # i.e. this is a forward-looking prediction rather than a plan for a
+    # squad already locked in. Decided here so no consumer has to infer
+    # it by comparing the two fields itself.
+    is_future_gameweek: bool
     generated_at: str
     decision_engine_version: str
     data_source: str
@@ -408,6 +421,7 @@ def build_gameweek_decision(
     fixtures: list[Fixture],
     picks: list[SquadPick] | list[int],
     gameweek: int,
+    source_picks_gameweek: int | None = None,
     entry_history: dict[str, object] | None = None,
     free_transfers_available: int | None = None,
     buy_candidates_limit: int = 10,
@@ -422,7 +436,18 @@ def build_gameweek_decision(
     15 picks; the buy-candidate pool is scored player-by-player
     (O(n), no combinatorial search) rather than optimized jointly with
     the squad.
+
+    `picks` is always a squad the manager really has. When predicting a
+    gameweek they have not picked yet, the caller supplies their latest
+    available squad together with `source_picks_gameweek` saying which
+    gameweek it came from; omitting it means the squad belongs to
+    `gameweek` itself, which is the ordinary case. Nothing here
+    fabricates picks for a future gameweek.
     """
+    resolved_source_gameweek = (
+        gameweek if source_picks_gameweek is None else source_picks_gameweek
+    )
+
     squad_decision = build_squad_decision(
         players=players,
         teams=teams,
@@ -487,6 +512,8 @@ def build_gameweek_decision(
 
     return GameweekDecision(
         gameweek=gameweek,
+        source_picks_gameweek=resolved_source_gameweek,
+        is_future_gameweek=resolved_source_gameweek < gameweek,
         generated_at=datetime.now(UTC).isoformat(),
         decision_engine_version=DECISION_ENGINE_VERSION,
         data_source=DATA_SOURCE,

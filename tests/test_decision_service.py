@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from fpl_agent.data.errors import FPLResourceNotFoundError
 from fpl_agent.data.models import (
     BootstrapData,
     EventLiveElement,
@@ -120,11 +121,20 @@ class FakeFPLClient:
         bootstrap: BootstrapData,
         picks: list[int],
         live_by_gameweek: dict[int, EventLiveResponse] | None = None,
+        fixtures: list[Fixture] | None = None,
+        picks_available_for: set[int] | None = None,
     ) -> None:
         self.bootstrap = bootstrap
         self.picks = picks
         self.live_by_gameweek = live_by_gameweek or {}
+        self.fixtures = fixtures or []
+        # None means "every gameweek has picks", which is how the real
+        # API behaves for any gameweek whose deadline has passed and
+        # what the pre-existing tests assume. Supplying a set models
+        # FPL's real 404 for a gameweek the manager has not picked yet.
+        self.picks_available_for = picks_available_for
         self.get_event_live_calls: list[int] = []
+        self.get_entry_picks_calls: list[int] = []
 
     async def get_bootstrap_static(self) -> BootstrapData:
         return self.bootstrap
@@ -139,6 +149,17 @@ class FakeFPLClient:
         )
 
     async def get_entry_picks(self, entry_id: int, gameweek: int) -> SquadPicksResponse:
+        self.get_entry_picks_calls.append(gameweek)
+
+        if (
+            self.picks_available_for is not None
+            and gameweek not in self.picks_available_for
+        ):
+            raise FPLResourceNotFoundError(
+                f"The squad for FPL entry {entry_id} in gameweek {gameweek} "
+                "was not found in the official FPL API.",
+            )
+
         return SquadPicksResponse(
             picks=[
                 SquadPick(
@@ -155,11 +176,37 @@ class FakeFPLClient:
         )
 
     async def get_fixtures(self) -> list[Fixture]:
-        return []
+        return self.fixtures
 
     async def get_event_live(self, gameweek: int) -> EventLiveResponse:
         self.get_event_live_calls.append(gameweek)
         return self.live_by_gameweek[gameweek]
+
+
+def make_fixtures(
+    gameweek: int,
+    difficulty: int,
+    finished: bool = False,
+) -> list[Fixture]:
+    """One fixture per pair of teams for a gameweek, at a fixed difficulty.
+
+    Both sides carry the same difficulty so a player's projected
+    fixture difficulty is the same regardless of which side his team
+    is on - keeping assertions about *which gameweek* was projected
+    free of home/away noise. Covers every team the squad fixtures use.
+    """
+    return [
+        Fixture(
+            id=gameweek * 100 + home_team,
+            event=gameweek,
+            team_h=home_team,
+            team_a=home_team + 1,
+            finished=finished,
+            team_h_difficulty=difficulty,
+            team_a_difficulty=difficulty,
+        )
+        for home_team in range(1, 20, 2)
+    ]
 
 
 def make_live(*points: tuple[int, int]) -> EventLiveResponse:
@@ -224,6 +271,182 @@ async def test_analyze_gameweek_never_overwrites_an_existing_snapshot() -> None:
     assert first_snapshot == second_snapshot
 
 
+# --- Predicting an upcoming gameweek from the latest available squad ---
+#
+# The manager has picks for gameweek 3 (current, in progress) but none
+# for gameweek 4, which is exactly what FPL returns before a deadline.
+
+
+def make_upcoming_client(
+    picks_available_for: set[int] | None = None,
+    current_gameweek_difficulty: int = 5,
+    target_gameweek_difficulty: int = 2,
+) -> FakeFPLClient:
+    """A world where GW3 is current/unplayed and GW4 is next.
+
+    The two gameweeks carry deliberately different fixture difficulty so
+    a projection can be traced back to the gameweek it actually used.
+    GW3's fixtures are unfinished, so a prediction that ignored the
+    target gameweek would still find them first.
+    """
+    bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=False, is_current=True),
+            make_gameweek(4, finished=False),
+        ],
+    )
+
+    return FakeFPLClient(
+        bootstrap,
+        PICKS,
+        fixtures=[
+            *make_fixtures(3, difficulty=current_gameweek_difficulty),
+            *make_fixtures(4, difficulty=target_gameweek_difficulty),
+        ],
+        picks_available_for=(
+            {3} if picks_available_for is None else picks_available_for
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_current_gameweek_prediction_still_uses_its_own_picks() -> None:
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID)
+
+    assert decision.gameweek == 3
+    assert decision.source_picks_gameweek == 3
+    assert decision.is_future_gameweek is False
+    assert client.get_entry_picks_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_future_gameweek_uses_the_latest_available_entry_picks() -> None:
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+
+    assert decision.gameweek == 4
+    assert decision.source_picks_gameweek == 3
+    assert client.get_entry_picks_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_future_gameweek_never_requests_picks_that_do_not_exist_yet() -> None:
+    """The exact failure the dashboard hit: asking FPL for a future
+    gameweek's squad answers 404, so it must never be asked for."""
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+
+    assert 4 not in client.get_entry_picks_calls
+
+
+@pytest.mark.asyncio
+async def test_gw3_to_gw4_prediction_no_longer_fails_with_squad_not_found() -> None:
+    """Regression for the reported scenario: selecting gameweek 4 while
+    gameweek 3 is the latest with a squad."""
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+
+    assert len(decision.starting_xi) == 11
+    assert decision.projected_gameweek_points > 0
+
+
+@pytest.mark.asyncio
+async def test_future_gameweek_projection_uses_target_gameweek_fixtures() -> None:
+    """GW4's fixtures decide a GW4 projection - never the still-unplayed
+    GW3 fixtures, which the projection layer would otherwise reach
+    first as the team's next unfinished fixture."""
+    client = make_upcoming_client(
+        current_gameweek_difficulty=5,
+        target_gameweek_difficulty=2,
+    )
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    upcoming = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+    current = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    assert {player.fixture_difficulty for player in upcoming.starting_xi} == {2.0}
+    assert {player.fixture_difficulty for player in current.starting_xi} == {5.0}
+
+
+@pytest.mark.asyncio
+async def test_future_gameweek_squad_contains_only_real_picked_players() -> None:
+    """Nothing is invented: every player planned for the upcoming
+    gameweek comes from the squad the manager actually owns."""
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+
+    squad_ids = {
+        player.player_id
+        for player in [*decision.starting_xi, *decision.bench]
+    }
+    assert squad_ids <= set(PICKS)
+
+
+@pytest.mark.asyncio
+async def test_explicit_past_gameweek_still_uses_that_gameweeks_own_picks() -> None:
+    bootstrap = make_bootstrap(
+        [
+            make_gameweek(2, finished=True),
+            make_gameweek(3, finished=False, is_current=True),
+        ],
+    )
+    client = FakeFPLClient(bootstrap, PICKS, picks_available_for={2, 3})
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=2)
+
+    assert decision.gameweek == 2
+    assert decision.source_picks_gameweek == 2
+    assert decision.is_future_gameweek is False
+    assert client.get_entry_picks_calls == [2]
+
+
+@pytest.mark.asyncio
+async def test_a_far_future_gameweek_still_plans_from_the_current_squad() -> None:
+    bootstrap = make_bootstrap(
+        [
+            make_gameweek(3, finished=False, is_current=True),
+            make_gameweek(4, finished=False),
+            make_gameweek(5, finished=False),
+        ],
+    )
+    client = FakeFPLClient(bootstrap, PICKS, picks_available_for={3})
+    service = FPLDecisionService(client=client, snapshot_store=SnapshotStore(":memory:"))  # type: ignore[arg-type]
+
+    decision = await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=5)
+
+    assert decision.gameweek == 5
+    assert decision.source_picks_gameweek == 3
+    assert decision.is_future_gameweek is True
+    assert client.get_entry_picks_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_predicting_an_upcoming_gameweek_records_a_snapshot_for_that_gameweek() -> None:
+    """A prediction made before the deadline is a real pre-gameweek
+    decision, so it becomes evaluable later under its own gameweek."""
+    store = SnapshotStore(":memory:")
+    client = make_upcoming_client()
+    service = FPLDecisionService(client=client, snapshot_store=store)  # type: ignore[arg-type]
+
+    await service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=4)
+
+    snapshot = store.get_snapshot(entry_id=ENTRY_ID, gameweek=4)
+    assert snapshot is not None
+    assert snapshot.gameweek == 4
+
+
 # --- evaluate_gameweek orchestration ---
 
 
@@ -276,6 +499,36 @@ async def test_evaluate_gameweek_returns_a_real_evaluation_once_snapshot_and_res
     assert evaluation.status == STATUS_EVALUATED
     assert evaluation.captain is not None
     assert client_after.get_event_live_calls == [3]
+
+
+@pytest.mark.asyncio
+async def test_evaluation_reads_the_snapshot_and_never_refetches_entry_picks() -> None:
+    """Historical evaluation stays snapshot -> actual outcomes. It must
+    not touch the picks endpoint, whose squad has moved on since."""
+    store = SnapshotStore(":memory:")
+
+    unfinished = make_bootstrap([make_gameweek(3, finished=False, is_current=True)])
+    seed_service = FPLDecisionService(  # type: ignore[arg-type]
+        client=FakeFPLClient(unfinished, PICKS),
+        snapshot_store=store,
+    )
+    decision = await seed_service.analyze_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    live_scores = {player.player_id: 5 for player in decision.starting_xi}
+    live_scores.update({player.player_id: 1 for player in decision.bench})
+
+    finished = make_bootstrap([make_gameweek(3, finished=True)])
+    client_after = FakeFPLClient(
+        finished,
+        PICKS,
+        live_by_gameweek={3: make_live(*live_scores.items())},
+    )
+    service_after = FPLDecisionService(client=client_after, snapshot_store=store)  # type: ignore[arg-type]
+
+    evaluation = await service_after.evaluate_gameweek(entry_id=ENTRY_ID, gameweek=3)
+
+    assert evaluation.status == STATUS_EVALUATED
+    assert client_after.get_entry_picks_calls == []
 
 
 @pytest.mark.asyncio
