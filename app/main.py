@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 from app.api.routes import router
+from app.cors import configure_cors
 from fpl_agent.agent.context import FPLAgentContext
 from fpl_agent.agent.runner import run_fpl_agent
 from fpl_agent.decisions.schemas import FPLDecisionOutput
@@ -18,6 +19,11 @@ app = FastAPI(
     ),
     version="0.1.0",
 )
+
+# The React frontend is deployed separately, so the browser calls this
+# API cross-origin. Allowed origins come from the environment - see
+# app/cors.py - so no deployment URL is baked into this source tree.
+configure_cors(app)
 
 app.include_router(router)
 
