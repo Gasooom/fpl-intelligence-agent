@@ -6,6 +6,12 @@ from fpl_agent.api.decision import gameweek_decision_to_response
 from fpl_agent.api.evaluation import gameweek_evaluation_to_response
 from fpl_agent.api.evaluation_schemas import GameweekEvaluationResponse
 from fpl_agent.api.schemas import GameweekDecisionResponse
+from fpl_agent.data.errors import (
+    FPLDataError,
+    FPLRateLimitedError,
+    FPLResourceNotFoundError,
+    FPLUpstreamTimeoutError,
+)
 from fpl_agent.decisions.service import FPLDecisionService
 
 router = APIRouter(prefix="/api/v1", tags=["decisions"])
@@ -21,6 +27,34 @@ def get_decision_service() -> FPLDecisionService:
     monkeypatching the module-level singleton.
     """
     return decision_service
+
+
+def _http_error_for(exc: FPLDataError) -> HTTPException:
+    """Map a data-layer failure onto its client-facing status code.
+
+    Shared by both endpoints so they can never answer differently for
+    the same upstream condition. The detail is the exception's own
+    message, which `FPLClient` composes from this project's wording
+    only - upstream exception text and response bodies never reach a
+    client.
+
+    Anything that is not one of these three stays a 502: an
+    unreachable or misbehaving FPL API is a server-side problem, and
+    reporting it as 404 would wrongly tell the caller their entry ID
+    or gameweek was invalid. Exceptions that are not `FPLDataError` at
+    all are left to propagate, so genuine bugs still surface as 500
+    rather than being disguised as an upstream fault.
+    """
+    if isinstance(exc, FPLResourceNotFoundError):
+        return HTTPException(status_code=404, detail=str(exc))
+
+    if isinstance(exc, FPLRateLimitedError):
+        return HTTPException(status_code=429, detail=str(exc))
+
+    if isinstance(exc, FPLUpstreamTimeoutError):
+        return HTTPException(status_code=504, detail=str(exc))
+
+    return HTTPException(status_code=502, detail=str(exc))
 
 
 @router.get(
@@ -67,6 +101,8 @@ async def get_gameweek_decision(
             status_code=400,
             detail=str(exc),
         ) from exc
+    except FPLDataError as exc:
+        raise _http_error_for(exc) from exc
 
     return gameweek_decision_to_response(decision)
 
@@ -105,5 +141,7 @@ async def get_gameweek_evaluation(
             status_code=400,
             detail=str(exc),
         ) from exc
+    except FPLDataError as exc:
+        raise _http_error_for(exc) from exc
 
     return gameweek_evaluation_to_response(evaluation)

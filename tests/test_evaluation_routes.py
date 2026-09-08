@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import get_decision_service
 from app.main import app
+from fpl_agent.data.errors import FPLResourceNotFoundError, FPLUpstreamError
 from fpl_agent.decisions.evaluation import (
     CaptainEvaluation,
     GameweekEvaluation,
@@ -266,3 +267,30 @@ def test_response_matches_deterministic_schema(client: TestClient) -> None:
         "starting_xi_players",
         "bench_players",
     }
+
+
+def test_upstream_not_found_returns_http_404(client: TestClient) -> None:
+    """Both endpoints share `_http_error_for`, so evaluation answers
+    the same status as the decision endpoint for the same condition."""
+    fake_service = FakeDecisionService(
+        error=FPLResourceNotFoundError(
+            "FPL entry 8731757 was not found in the official FPL API.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757")
+
+    assert response.status_code == 404
+    assert "httpx" not in response.text.lower()
+
+
+def test_upstream_failure_returns_http_502_rather_than_404(client: TestClient) -> None:
+    fake_service = FakeDecisionService(
+        error=FPLUpstreamError("The official FPL API could not return fpl entry 8731757."),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/evaluation/8731757")
+
+    assert response.status_code == 502

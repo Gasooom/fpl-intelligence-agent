@@ -2,19 +2,29 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import get_decision_service
 from app.main import app
 from fpl_agent.analysis.sell_scoring import SellScore
+from fpl_agent.data.client import FPLClient
+from fpl_agent.data.errors import (
+    FPLRateLimitedError,
+    FPLResourceNotFoundError,
+    FPLUpstreamError,
+    FPLUpstreamTimeoutError,
+)
 from fpl_agent.decisions.gameweek_decision import GameweekDecision, RecommendationEvidence
+from fpl_agent.decisions.service import FPLDecisionService
 from fpl_agent.decisions.squad_analysis import SquadPlayerAnalysis
 from fpl_agent.decisions.transfer_analysis import (
     BuyCandidate,
     SellCandidate,
     TransferPair,
 )
+from fpl_agent.persistence.snapshot_store import SnapshotStore
 
 
 def make_player(
@@ -536,3 +546,140 @@ def test_negative_free_transfers_available_returns_http_422(
 
     assert response.status_code == 422
     assert fake_service.calls == []
+
+
+def test_upstream_not_found_returns_http_404(client: TestClient) -> None:
+    """An entry ID FPL has never issued, or a gameweek whose squad is
+    not picked yet, is the caller's mistake - not an internal fault."""
+    fake_service = FakeDecisionService(
+        error=FPLResourceNotFoundError(
+            "FPL entry 8731757 was not found in the official FPL API.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "FPL entry 8731757 was not found in the official FPL API."
+    )
+
+
+def test_upstream_not_found_response_hides_internal_detail(client: TestClient) -> None:
+    fake_service = FakeDecisionService(
+        error=FPLResourceNotFoundError(
+            "FPL entry 8731757 was not found in the official FPL API.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    body = client.get("/api/v1/decision/8731757").text
+
+    assert "httpx" not in body.lower()
+    assert "Traceback" not in body
+    assert "raise_for_status" not in body
+    assert "fantasy.premierleague.com" not in body
+
+
+def test_upstream_failure_returns_http_502_rather_than_404(client: TestClient) -> None:
+    """A broken upstream must not be reported as "not found", which
+    would wrongly tell the caller their entry ID was invalid."""
+    fake_service = FakeDecisionService(
+        error=FPLUpstreamError("The official FPL API could not return fpl entry 8731757."),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 502
+
+
+def test_upstream_timeout_returns_http_504_rather_than_404(client: TestClient) -> None:
+    fake_service = FakeDecisionService(
+        error=FPLUpstreamTimeoutError(
+            "Timed out fetching fpl entry 8731757 from the official FPL API.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 504
+
+
+def test_upstream_rate_limit_returns_http_429(client: TestClient) -> None:
+    fake_service = FakeDecisionService(
+        error=FPLRateLimitedError(
+            "The official FPL API is rate limiting this service. Please try again shortly.",
+        ),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 429
+
+
+def test_upstream_404_reaches_the_client_as_http_404_end_to_end(
+    client: TestClient,
+) -> None:
+    """The whole chain, with only the network faked: an httpx 404 from
+    a real `FPLClient`, through a real `FPLDecisionService`, to the
+    HTTP response. Guards against any layer in between swallowing or
+    re-wrapping the error back into a 500.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": "upstream-only diagnostic text"})
+
+    service = FPLDecisionService(
+        client=FPLClient(transport=httpx.MockTransport(handler)),
+        snapshot_store=SnapshotStore(":memory:"),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 404
+    assert "upstream-only diagnostic text" not in response.text
+    assert "httpx" not in response.text.lower()
+
+
+def test_upstream_500_reaches_the_client_as_http_502_end_to_end(
+    client: TestClient,
+) -> None:
+    """Same chain, but a failing upstream must not be reported as a
+    404 - that would wrongly blame the caller's entry ID."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"detail": "upstream is down"})
+
+    service = FPLDecisionService(
+        client=FPLClient(transport=httpx.MockTransport(handler)),
+        snapshot_store=SnapshotStore(":memory:"),
+    )
+    app.dependency_overrides[get_decision_service] = lambda: service
+
+    response = client.get("/api/v1/decision/8731757")
+
+    assert response.status_code == 502
+    assert "upstream is down" not in response.text
+
+
+def test_unexpected_application_error_still_returns_http_500() -> None:
+    """The translation layer must not swallow genuine bugs. A plain
+    RuntimeError is not an `FPLDataError`, so it has to stay a 500
+    rather than being disguised as an upstream fault."""
+    fake_service = FakeDecisionService(error=RuntimeError("a genuine bug"))
+    app.dependency_overrides[get_decision_service] = lambda: fake_service
+
+    # raise_server_exceptions=False so the response is observed the way
+    # a real client would see it, instead of the error propagating out
+    # of the test client.
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.get("/api/v1/decision/8731757")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 500
